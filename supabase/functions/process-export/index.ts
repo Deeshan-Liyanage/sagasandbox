@@ -1,31 +1,4 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
-
-function resolveSupabaseAdminKey() {
-  const secretKeysRaw = Deno.env.get("SUPABASE_SECRET_KEYS")
-  if (secretKeysRaw) {
-    try {
-      const secretKeys = JSON.parse(secretKeysRaw) as Record<string, string>
-      if (secretKeys.default) return secretKeys.default
-    } catch {
-      // Fall through to single-key env vars.
-    }
-  }
-
-  return (
-    Deno.env.get("SUPABASE_SECRET_KEY") ??
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
-    Deno.env.get("SUPABASE_SB_KEY")
-  )
-}
-
-const adminKey = resolveSupabaseAdminKey()
-if (!adminKey) {
-  throw new Error(
-    "Missing Supabase admin key (SUPABASE_SECRET_KEYS, SUPABASE_SECRET_KEY, or SUPABASE_SERVICE_ROLE_KEY)",
-  )
-}
-
-const supabase = createClient(Deno.env.get("SUPABASE_URL")!, adminKey)
+import { getAdminClient } from "../_shared/admin-client.ts"
 
 const FAL_KEY = Deno.env.get("FAL_KEY") ?? ""
 
@@ -38,6 +11,17 @@ type TimelineEventRow = {
 }
 
 Deno.serve(async (req) => {
+  let supabase
+  try {
+    supabase = getAdminClient()
+  } catch (err) {
+    console.error("[process-export] init failed:", err)
+    return Response.json(
+      { error: err instanceof Error ? err.message : String(err) },
+      { status: 500 },
+    )
+  }
+
   const { export_id } = await req.json()
 
   await supabase.from("exports").update({ status: "processing" }).eq("id", export_id)
@@ -79,6 +63,7 @@ async function processStoryboardPdf(
   projectId: string,
   events: TimelineEventRow[],
 ) {
+  const supabase = getAdminClient()
   const manifest = {
     type: "storyboard",
     project_id: projectId,
@@ -162,6 +147,7 @@ async function kokoro(text: string, voiceIndex: number, voiceOverride?: string):
 }
 
 async function processAudioScript(exportId: string, projectId: string, events: TimelineEventRow[]) {
+  const supabase = getAdminClient()
   // Build a name→voice map from characters in this project so voice_id
   // (a Kokoro voice name) can be resolved per-event by character mention.
   const { data: characters } = await supabase
@@ -242,6 +228,7 @@ async function processAnimaticVideo(
   projectId: string,
   events: TimelineEventRow[],
 ) {
+  const supabase = getAdminClient()
   const prompt =
     events.map((e) => e.description ?? e.title).filter(Boolean).join(". ") ||
     "Cinematic story animatic"
