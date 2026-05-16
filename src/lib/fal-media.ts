@@ -33,12 +33,20 @@ export async function falDepthMap(imageUrl: string): Promise<string | null> {
   }
 }
 
+function resolvePublicSiteUrl(): string | undefined {
+  const explicit = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  if (explicit) return explicit;
+  const vercel = process.env.VERCEL_URL?.trim();
+  if (vercel) return vercel.startsWith("http") ? vercel : `https://${vercel}`;
+  return undefined;
+}
+
 export async function falVideoQueue(options: {
   prompt: string;
   imageUrl?: string;
 }): Promise<{ requestId: string } | null> {
   if (!FAL_KEY) return null;
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  const siteUrl = resolvePublicSiteUrl();
   const webhookUrl = siteUrl ? `${siteUrl}/api/webhooks/fal` : undefined;
   const model = "fal-ai/luma-dream-machine";
   const input: Record<string, unknown> = { prompt: options.prompt };
