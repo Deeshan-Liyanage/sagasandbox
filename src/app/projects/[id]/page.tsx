@@ -31,6 +31,10 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
 
   const supabase = await createClient()
 
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
   const { data: project, error: projectError } = await supabase
     .from("projects")
     .select("*")
@@ -66,6 +70,7 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
       initialPins={pins ?? []}
       initialEvents={events ?? []}
       initialCharacters={characters ?? []}
+      userId={user?.id}
     />
   )
 }

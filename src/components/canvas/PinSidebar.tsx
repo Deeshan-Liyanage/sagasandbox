@@ -5,10 +5,15 @@ import { Trash2, X } from "lucide-react";
 import type { LocationPin } from "@/types/app";
 import { asGenStatus } from "@/types/app";
 import { GenStatusImage } from "@/components/shared/GenStatusImage";
+import {
+  PROJECT_API_UNAVAILABLE_MESSAGE,
+  readApiError,
+} from "@/lib/project-api";
 
 export interface PinSidebarProps {
   pin: LocationPin | null;
   projectId: string;
+  apiAvailable?: boolean;
   onClose: () => void;
   onPinUpdated: (pin: LocationPin) => void;
   onPinDeleted?: (pinId: string) => void;
@@ -17,6 +22,7 @@ export interface PinSidebarProps {
 export function PinSidebar({
   pin,
   projectId,
+  apiAvailable = true,
   onClose,
   onPinUpdated,
   onPinDeleted,
@@ -24,13 +30,19 @@ export function PinSidebar({
   const [label, setLabel] = useState(pin?.label ?? "");
   const [description, setDescription] = useState(pin?.description ?? "");
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (!pin) return null;
 
   const activePin = pin;
 
   async function patchPin(body: { label?: string; description?: string }) {
+    if (!apiAvailable) {
+      setError(PROJECT_API_UNAVAILABLE_MESSAGE);
+      return;
+    }
     setSaving(true);
+    setError(null);
     try {
       const res = await fetch(
         `/api/projects/${projectId}/pins/${activePin.id}`,
@@ -40,11 +52,13 @@ export function PinSidebar({
           body: JSON.stringify(body),
         },
       );
-      if (!res.ok) throw new Error("Update failed");
+      if (!res.ok) {
+        throw new Error(await readApiError(res, "Update failed"));
+      }
       const { pin: updated } = (await res.json()) as { pin: LocationPin };
       onPinUpdated(updated);
-    } catch {
-      // TODO: toast error
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Update failed");
     } finally {
       setSaving(false);
     }
@@ -66,17 +80,24 @@ export function PinSidebar({
   }
 
   async function handleDelete() {
+    if (!apiAvailable) {
+      setError(PROJECT_API_UNAVAILABLE_MESSAGE);
+      return;
+    }
     if (!confirm("Delete this location pin?")) return;
+    setError(null);
     try {
       const res = await fetch(
         `/api/projects/${projectId}/pins/${activePin.id}`,
         { method: "DELETE" },
       );
-      if (!res.ok) throw new Error("Delete failed");
+      if (!res.ok) {
+        throw new Error(await readApiError(res, "Delete failed"));
+      }
       onPinDeleted?.(activePin.id);
       onClose();
-    } catch {
-      // TODO: toast error
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Delete failed");
     }
   }
 
@@ -111,7 +132,7 @@ export function PinSidebar({
           <input
             type="text"
             value={label}
-            disabled={saving}
+            disabled={saving || !apiAvailable}
             onChange={(e) => setLabel(e.target.value)}
             onBlur={handleBlur}
             className="w-full rounded border border-[#2a2a2e] bg-[#0e0e0f] px-2 py-1.5 text-sm text-white outline-none focus:border-[#7c3aed]"
@@ -124,20 +145,23 @@ export function PinSidebar({
           </span>
           <textarea
             value={description}
-            disabled={saving}
+            disabled={saving || !apiAvailable}
             onChange={(e) => setDescription(e.target.value)}
             onBlur={handleBlur}
             rows={4}
             className="w-full resize-none rounded border border-[#2a2a2e] bg-[#0e0e0f] px-2 py-1.5 text-sm text-white outline-none focus:border-[#7c3aed]"
           />
         </label>
+
+        {error ? <p className="text-xs text-[#ef4444]">{error}</p> : null}
       </div>
 
       <div className="border-t border-[#2a2a2e] p-4">
         <button
           type="button"
           onClick={handleDelete}
-          className="flex w-full items-center justify-center gap-2 rounded-lg border border-[#ef4444]/40 px-3 py-2 text-sm text-[#ef4444] hover:bg-[#ef4444]/10"
+          disabled={!apiAvailable || saving}
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-[#ef4444]/40 px-3 py-2 text-sm text-[#ef4444] hover:bg-[#ef4444]/10 disabled:opacity-50"
         >
           <Trash2 className="h-4 w-4" />
           Delete pin
