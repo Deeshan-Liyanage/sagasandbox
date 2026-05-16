@@ -1,8 +1,8 @@
 # Orchestrator runbook: Supabase ↔ Vercel integration
 
 **Audience:** Managing Cursor agent (or human lead) coordinating Agents A/B/C after `feat(db)` is on `main`.  
-**Supabase project ref:** `icxtuezwlivhjzjbqxnk`  
-**Supabase API URL:** `https://icxtuezwlivhjzjbqxnk.supabase.co`  
+**Supabase project ref:** `<your-project-ref>` (Dashboard → Project Settings → General)  
+**Supabase API URL:** `https://<your-project-ref>.supabase.co` (same as `NEXT_PUBLIC_SUPABASE_URL`)  
 **Do not commit secrets.** Values live in `.env.local` (local) and Vercel / Supabase dashboards (deployed).
 
 ---
@@ -42,6 +42,7 @@ Copy from `.env.example`. Map each variable to **where** it must exist.
 | `NEXT_PUBLIC_SITE_URL` | ✅ (preview URL) | ✅ (prod domain) | — | `http://localhost:3000` |
 | `FAL_KEY` | ✅ | ✅ | ✅ `FAL_KEY` | ✅ |
 | `ELEVENLABS_API_KEY` | optional | optional | ✅ | optional |
+| `ELEVENLABS_DEFAULT_VOICE_ID` | — | — | ✅ optional | optional |
 | `OPENAI_API_KEY` | ✅ | ✅ | — | ✅ |
 
 **Rules for the orchestrator:**
@@ -214,7 +215,7 @@ Secrets required in GitHub repo:
 
 If the team uses [Vercel Supabase integration](https://vercel.com/integrations/supabase):
 
-1. Vercel → Project → **Integrations** → Supabase → Connect project `icxtuezwlivhjzjbqxnk`
+1. Vercel → Project → **Integrations** → Supabase → Connect your Supabase project (use the ref from Dashboard)
 2. Integration can auto-sync `NEXT_PUBLIC_SUPABASE_URL` and anon key to Vercel env.
 3. **Still manually add:** `SUPABASE_SERVICE_ROLE_KEY`, `FAL_KEY`, `NEXT_PUBLIC_SITE_URL`, `OPENAI_API_KEY`, Edge secrets.
 

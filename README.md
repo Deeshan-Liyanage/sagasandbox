@@ -40,8 +40,8 @@ Native Vercel Git auto-deploys are disabled in [`vercel.json`](vercel.json); Git
    | Secret | Value |
    |--------|--------|
    | `VERCEL_TOKEN` | Create at [vercel.com/account/tokens](https://vercel.com/account/tokens) |
-   | `VERCEL_ORG_ID` | `team_DrVFOfC7OApuPRQbIJ3FdjRs` |
-   | `VERCEL_PROJECT_ID` | `prj_iWBLibMvjryvxvwJCSP3UIR0jt4T` |
+   | `VERCEL_ORG_ID` | Vercel → **Settings** → copy **Team ID** (or personal account ID) |
+   | `VERCEL_PROJECT_ID` | SagaSandbox project → **Settings** → **General** → **Project ID** |
 
 3. Push to `main` or open a PR to confirm the workflow passes.
 

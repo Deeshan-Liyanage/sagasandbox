@@ -84,7 +84,8 @@ async function processStoryboardPdf(
 
 async function processAudioScript(exportId: string, events: TimelineEventRow[]) {
   const elevenLabsKey = Deno.env.get("ELEVENLABS_API_KEY")
-  const defaultVoice = "pNInz6obpgDQGcFmaJgB"
+  const defaultVoice =
+    Deno.env.get("ELEVENLABS_DEFAULT_VOICE_ID") ?? "pNInz6obpgDQGcFmaJgB"
   const audioUrls: string[] = []
 
   for (const event of events) {
