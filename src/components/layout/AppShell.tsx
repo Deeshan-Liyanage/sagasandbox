@@ -70,7 +70,7 @@ export function AppShell({
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <aside className="flex w-[280px] shrink-0 flex-col border-r border-[#2a2a2e] bg-[#1a1a1e]">
+        <aside className="flex w-[220px] shrink-0 flex-col border-r border-[#2a2a2e] bg-[#1a1a1e] xl:w-[280px]">
           <nav className="flex flex-col gap-1 p-3">
             {NAV_ITEMS.map(({ id, label, icon: Icon }) => (
               <button
@@ -97,7 +97,7 @@ export function AppShell({
         <main className="relative min-w-0 flex-1">{children}</main>
       </div>
 
-      <footer className="h-[120px] shrink-0 border-t border-[#2a2a2e] bg-[#141416]">
+      <footer className="h-[100px] shrink-0 overflow-hidden border-t border-[#2a2a2e] bg-[#141416] xl:h-[120px]">
         {timelineContent}
       </footer>
     </div>

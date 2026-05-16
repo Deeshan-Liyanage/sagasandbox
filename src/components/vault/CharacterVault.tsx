@@ -10,6 +10,7 @@ import {
   PROJECT_API_UNAVAILABLE_MESSAGE,
   readApiError,
 } from "@/lib/project-api";
+import { toastError } from "@/store/toast-store";
 
 interface CharacterVaultProps {
   projectId: string;
@@ -74,7 +75,9 @@ export function CharacterVault({
         voice_id: "",
       });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Create failed");
+      const message = e instanceof Error ? e.message : "Create failed";
+      setError(message);
+      toastError(message);
     }
   }
 
@@ -124,7 +127,9 @@ export function CharacterVault({
         ),
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Upload failed");
+      const message = e instanceof Error ? e.message : "Upload failed";
+      setError(message);
+      toastError(message);
     } finally {
       setUploading(false);
     }
@@ -271,6 +276,20 @@ function Portrait({ character }: { character: Character }) {
   );
 }
 
+/** Kokoro TTS voices available for narrator assignment. */
+const KOKORO_VOICES: { id: string; label: string }[] = [
+  { id: "", label: "Auto (narrator rotation)" },
+  { id: "af_heart", label: "Heart (F)" },
+  { id: "af_bella", label: "Bella (F)" },
+  { id: "af_nova", label: "Nova (F)" },
+  { id: "af_sarah", label: "Sarah (F)" },
+  { id: "af_river", label: "River (F)" },
+  { id: "am_echo", label: "Echo (M)" },
+  { id: "am_eric", label: "Eric (M)" },
+  { id: "am_michael", label: "Michael (M)" },
+  { id: "am_adam", label: "Adam (M)" },
+];
+
 function CharacterEditPanel({
   character,
   uploading,
@@ -312,17 +331,24 @@ function CharacterEditPanel({
         {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
       </label>
       <label className="block text-xs text-[#9ca3af]">
-        ElevenLabs voice ID
-        <input
+        Narrator voice
+        <select
           value={voiceId}
           disabled={!apiAvailable}
-          onChange={(e) => setVoiceId(e.target.value)}
-          onBlur={() => {
+          onChange={(e) => {
+            const next = e.target.value;
+            setVoiceId(next);
             if (!apiAvailable) return;
-            void onPatch(character.id, { voice_id: voiceId });
+            void onPatch(character.id, { voice_id: next || null });
           }}
           className="mt-1 w-full rounded border border-[#2a2a2e] bg-[#0e0e0f] px-2 py-1 text-white disabled:opacity-50"
-        />
+        >
+          {KOKORO_VOICES.map((v) => (
+            <option key={v.id} value={v.id}>
+              {v.label}
+            </option>
+          ))}
+        </select>
       </label>
     </div>
   );

@@ -27,13 +27,14 @@ if (!adminKey) {
 
 const supabase = createClient(Deno.env.get("SUPABASE_URL")!, adminKey)
 
+const FAL_KEY = Deno.env.get("FAL_KEY") ?? ""
+
 type TimelineEventRow = {
   id: string
   title: string
   description: string | null
   generated_image_url: string | null
   in_world_time: string | null
-  characters?: Array<{ voice_id: string | null }>
 }
 
 Deno.serve(async (req) => {
@@ -59,7 +60,7 @@ Deno.serve(async (req) => {
     if (exportRow.type === "storyboard_pdf") {
       await processStoryboardPdf(export_id, exportRow.project_id, events ?? [])
     } else if (exportRow.type === "audio_script") {
-      await processAudioScript(export_id, events ?? [])
+      await processAudioScript(export_id, exportRow.project_id, events ?? [])
     }
 
     await supabase.from("exports").update({ status: "done" }).eq("id", export_id)
@@ -104,63 +105,127 @@ async function processStoryboardPdf(
     .eq("id", exportId)
 }
 
-async function processAudioScript(exportId: string, events: TimelineEventRow[]) {
-  const elevenLabsKey = Deno.env.get("ELEVENLABS_API_KEY")
-  const defaultVoice =
-    Deno.env.get("ELEVENLABS_DEFAULT_VOICE_ID") ?? "pNInz6obpgDQGcFmaJgB"
+/** Voices from fal-ai/kokoro — keep in sync with CharacterVault KOKORO_VOICES. */
+const KOKORO_VOICES = [
+  "af_heart",
+  "af_bella",
+  "af_nova",
+  "af_sarah",
+  "af_river",
+  "am_echo",
+  "am_eric",
+  "am_michael",
+  "am_adam",
+] as const
+
+const NARRATOR_VOICES = ["am_echo", "am_eric", "am_michael", "af_sarah", "af_nova"]
+
+function isKokoroVoice(voice: string): boolean {
+  return (KOKORO_VOICES as readonly string[]).includes(voice)
+}
+
+async function kokoro(text: string, voiceIndex: number, voiceOverride?: string): Promise<string | null> {
+  if (!FAL_KEY) {
+    console.warn("FAL_KEY not set — skipping TTS for event")
+    return null
+  }
+
+  const voice = voiceOverride ?? NARRATOR_VOICES[voiceIndex % NARRATOR_VOICES.length]
+
+  let attempt = 0
+  while (attempt < 3) {
+    try {
+      const res = await fetch("https://fal.run/fal-ai/kokoro", {
+        method: "POST",
+        headers: {
+          Authorization: `Key ${FAL_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ prompt: text, voice, speed: 0.95 }),
+      })
+
+      if (res.ok) {
+        const json = await res.json() as { audio?: { url?: string } }
+        return json.audio?.url ?? null
+      }
+
+      await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt))
+      attempt++
+    } catch {
+      attempt++
+    }
+  }
+
+  return null
+}
+
+async function processAudioScript(exportId: string, projectId: string, events: TimelineEventRow[]) {
+  // Build a name→voice map from characters in this project so voice_id
+  // (a Kokoro voice name) can be resolved per-event by character mention.
+  const { data: characters } = await supabase
+    .from("characters")
+    .select("name, voice_id")
+    .eq("project_id", projectId)
+
+  const voiceMap = new Map<string, string>()
+  for (const c of characters ?? []) {
+    if (c.voice_id) voiceMap.set(c.name.toLowerCase(), c.voice_id)
+  }
+
   const audioUrls: string[] = []
 
-  for (const event of events) {
-    await new Promise((r) => setTimeout(r, 500))
-
-    const voiceId = event.characters?.[0]?.voice_id ?? defaultVoice
+  for (let i = 0; i < events.length; i++) {
+    const event = events[i]
     const text = event.description ?? event.title
 
-    let attempt = 0
-    let audioBuffer: ArrayBuffer | null = null
+    // Resolve Kokoro voice: first character mentioned in text wins, else rotate.
+    const matchedVoice = [...voiceMap.entries()]
+      .find(([name]) => text.toLowerCase().includes(name))?.[1]
+    const voiceOverride =
+      matchedVoice && isKokoroVoice(matchedVoice) ? matchedVoice : undefined
 
-    while (attempt < 3 && !audioBuffer && elevenLabsKey) {
+    // 500 ms gap between calls to stay within rate limits
+    if (i > 0) await new Promise((r) => setTimeout(r, 500))
+
+    const audioUrl = await kokoro(text, i, voiceOverride)
+
+    if (audioUrl) {
+      // Download from fal CDN and persist in Supabase Storage so the URL
+      // does not expire (fal temp URLs last ~1 hour).
       try {
-        const res = await fetch(
-          `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
-          {
-            method: "POST",
-            headers: {
-              "xi-api-key": elevenLabsKey,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              text,
-              model_id: "eleven_monolingual_v1",
-              voice_settings: { stability: 0.5, similarity_boost: 0.75 },
-            }),
-          },
-        )
+        const audioRes = await fetch(audioUrl)
+        if (audioRes.ok) {
+          const buffer = await audioRes.arrayBuffer()
+          const path = `audio/${exportId}/${event.id}.wav`
+          await supabase.storage.from("audio").upload(path, buffer, {
+            contentType: "audio/wav",
+            upsert: true,
+          })
+          const { data: url } = supabase.storage.from("audio").getPublicUrl(path)
+          const persistedUrl = url.publicUrl
 
-        if (res.ok) {
-          audioBuffer = await res.arrayBuffer()
+          await supabase
+            .from("timeline_events")
+            .update({ audio_url: persistedUrl })
+            .eq("id", event.id)
+
+          audioUrls.push(persistedUrl)
         } else {
-          await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt))
-          attempt++
+          // Fall back to direct fal URL
+          await supabase
+            .from("timeline_events")
+            .update({ audio_url: audioUrl })
+            .eq("id", event.id)
+          audioUrls.push(audioUrl)
         }
       } catch {
-        attempt++
+        // Fall back to direct fal URL on any storage error
+        await supabase
+          .from("timeline_events")
+          .update({ audio_url: audioUrl })
+          .eq("id", event.id)
+        audioUrls.push(audioUrl)
       }
-    }
-
-    if (audioBuffer) {
-      const path = `audio/${exportId}/${event.id}.mp3`
-      await supabase.storage.from("audio").upload(path, audioBuffer, {
-        contentType: "audio/mpeg",
-        upsert: true,
-      })
-      const { data: url } = supabase.storage.from("audio").getPublicUrl(path)
-      audioUrls.push(url.publicUrl)
-
-      await supabase
-        .from("timeline_events")
-        .update({ audio_url: url.publicUrl })
-        .eq("id", event.id)
     }
   }
 

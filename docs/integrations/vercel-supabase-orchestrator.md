@@ -41,9 +41,7 @@ Copy from `.env.example`. Map each variable to **where** it must exist.
 | `SUPABASE_SECRET_KEY` | ✅ | ✅ | — | ✅ |
 | `SUPABASE_SERVICE_ROLE_KEY` (legacy fallback) | optional | optional | — | optional |
 | `NEXT_PUBLIC_SITE_URL` | ✅ (preview URL) | ✅ (prod domain) | — | `http://localhost:3000` |
-| `FAL_KEY` | ✅ | ✅ | ✅ `FAL_KEY` | ✅ |
-| `ELEVENLABS_API_KEY` | optional | optional | ✅ | optional |
-| `ELEVENLABS_DEFAULT_VOICE_ID` | — | — | ✅ optional | optional |
+| `FAL_KEY` | ✅ | ✅ | ✅ (image gen + Kokoro TTS) | ✅ |
 | `OPENAI_API_KEY` | ✅ | ✅ | — | ✅ |
 
 **Rules for the orchestrator:**
@@ -123,8 +121,7 @@ fal.ai calls `webhookUrl: ${NEXT_PUBLIC_SITE_URL}/api/webhooks/fal` from `src/li
 
 1. **Edge Functions** → **Secrets**
 2. Set:
-   - `FAL_KEY` — same value as Vercel
-   - `ELEVENLABS_API_KEY` — for `process-export` audio path
+   - `FAL_KEY` — same value as Vercel (covers both image generation and Kokoro TTS audio in `process-export`)
 3. `SUPABASE_URL` plus key env (`SUPABASE_SECRET_KEYS` and legacy `SUPABASE_SERVICE_ROLE_KEY`) are injected by Supabase runtime.
 
 ### 6.3 Realtime (Agent C)

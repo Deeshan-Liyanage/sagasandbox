@@ -95,16 +95,58 @@ export function useProjectRealtime(
   }, [projectId]);
 }
 
+type BroadcastChannelEntry = {
+  ready: Promise<void>;
+  send: (op: CanvasOpPayload) => Promise<void>;
+};
+
+const broadcastChannels = new Map<string, BroadcastChannelEntry>();
+
+function getBroadcastChannel(projectId: string): BroadcastChannelEntry {
+  const existing = broadcastChannels.get(projectId);
+  if (existing) return existing;
+
+  const supabase = createClient();
+  const channel = supabase.channel(`project:${projectId}`);
+
+  const ready = new Promise<void>((resolve, reject) => {
+    channel.subscribe((status, err) => {
+      if (status === "SUBSCRIBED") resolve();
+      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+        reject(err ?? new Error(`Realtime channel ${status}`));
+      }
+    });
+  });
+
+  const entry: BroadcastChannelEntry = {
+    ready,
+    send: async (op) => {
+      await ready;
+      const result = await channel.send({
+        type: "broadcast",
+        event: "canvas_op",
+        payload: op,
+      });
+      if (result === "error") {
+        throw new Error("Failed to broadcast canvas op");
+      }
+    },
+  };
+
+  broadcastChannels.set(projectId, entry);
+  return entry;
+}
+
+/** Broadcast canvas ops on a subscribed channel so peers receive cursor/brush updates. */
 export async function broadcastCanvasOp(
   projectId: string,
   op: CanvasOpPayload,
 ) {
   if (!isSupabaseConfigured()) return;
 
-  const supabase = createClient();
-  await supabase.channel(`project:${projectId}`).send({
-    type: "broadcast",
-    event: "canvas_op",
-    payload: op,
-  });
+  try {
+    await getBroadcastChannel(projectId).send(op);
+  } catch {
+    broadcastChannels.delete(projectId);
+  }
 }

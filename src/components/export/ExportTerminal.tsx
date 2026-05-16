@@ -9,18 +9,42 @@ import {
   PROJECT_API_UNAVAILABLE_MESSAGE,
   readApiError,
 } from "@/lib/project-api";
+import { toastError } from "@/store/toast-store";
 
 interface ExportTerminalProps {
   projectId: string;
   events: TimelineEvent[];
   apiAvailable?: boolean;
   onExportUpdate?: (exp: Export) => void;
+  liveExport?: Export | null;
+  realtimeActive?: boolean;
 }
 
 const EXPORT_TYPES: { id: ExportType; label: string }[] = [
   { id: "storyboard_pdf", label: "Storyboard PDF" },
   { id: "audio_script", label: "Audio Script" },
 ];
+
+/** `audio_script` exports store a JSON array of URLs in `output_url`. */
+function resolveExportDownloadUrl(
+  type: ExportType,
+  outputUrl: string | null | undefined,
+  signedUrl?: string | null,
+): string | null {
+  if (signedUrl) return signedUrl;
+  if (!outputUrl) return null;
+  if (type === "audio_script") {
+    try {
+      const parsed = JSON.parse(outputUrl) as unknown;
+      if (Array.isArray(parsed) && typeof parsed[0] === "string") {
+        return parsed[0];
+      }
+    } catch {
+      // fall through — output_url may already be a single URL
+    }
+  }
+  return outputUrl;
+}
 
 function progressWidth(status: Export["status"] | null) {
   switch (status) {
@@ -40,6 +64,8 @@ export function ExportTerminal({
   events,
   apiAvailable = true,
   onExportUpdate,
+  liveExport = null,
+  realtimeActive = false,
 }: ExportTerminalProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [exportType, setExportType] = useState<ExportType>("storyboard_pdf");
@@ -91,15 +117,36 @@ export function ExportTerminal({
       setExportStatus(exp.status);
       onExportUpdate?.(exp);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Export failed");
+      const message = e instanceof Error ? e.message : "Export failed";
+      setError(message);
+      toastError(message);
     } finally {
       setSubmitting(false);
     }
   }
 
+  const realtimeExport =
+    liveExport && currentExportId && liveExport.id === currentExportId
+      ? liveExport
+      : null;
+  const displayStatus = realtimeExport?.status ?? exportStatus;
+  const displayDownloadUrl =
+    realtimeExport?.status === "done"
+      ? resolveExportDownloadUrl(exportType, realtimeExport.output_url, null)
+      : downloadUrl;
+  const displayError =
+    realtimeExport?.status === "error" ? "Export failed" : error;
+
   useEffect(() => {
     if (!currentExportId) return;
+    if (
+      realtimeExport?.status === "done" ||
+      realtimeExport?.status === "error"
+    ) {
+      return;
+    }
 
+    const pollMs = realtimeActive ? 5000 : 2000;
     const interval = setInterval(async () => {
       try {
         const res = await fetch(
@@ -113,7 +160,13 @@ export function ExportTerminal({
         setExportStatus(data.export.status);
         onExportUpdate?.(data.export);
         if (data.export.status === "done") {
-          setDownloadUrl(data.signed_url ?? data.export.output_url);
+          setDownloadUrl(
+            resolveExportDownloadUrl(
+              exportType,
+              data.export.output_url,
+              data.signed_url,
+            ),
+          );
           clearInterval(interval);
         }
         if (data.export.status === "error") {
@@ -123,10 +176,17 @@ export function ExportTerminal({
       } catch {
         // ignore poll errors
       }
-    }, 2000);
+    }, pollMs);
 
     return () => clearInterval(interval);
-  }, [currentExportId, projectId, onExportUpdate]);
+  }, [
+    currentExportId,
+    projectId,
+    exportType,
+    onExportUpdate,
+    realtimeActive,
+    realtimeExport?.status,
+  ]);
 
   return (
     <div className="space-y-4 p-1">
@@ -181,21 +241,23 @@ export function ExportTerminal({
         ))}
       </ul>
 
-      {exportStatus ? (
+      {displayStatus ? (
         <div>
           <div className="mb-1 flex justify-between text-[10px] text-[#9ca3af]">
-            <span>Status: {exportStatus}</span>
+            <span>Status: {displayStatus}</span>
           </div>
           <div className="h-1.5 overflow-hidden rounded-full bg-[#252528]">
             <div
               className="h-full bg-[#7c3aed] transition-all duration-500"
-              style={{ width: progressWidth(exportStatus) }}
+              style={{ width: progressWidth(displayStatus) }}
             />
           </div>
         </div>
       ) : null}
 
-      {error ? <p className="text-xs text-[#ef4444]">{error}</p> : null}
+      {displayError ? (
+        <p className="text-xs text-[#ef4444]">{displayError}</p>
+      ) : null}
 
       <div className="flex flex-col gap-2">
         <button
@@ -206,9 +268,9 @@ export function ExportTerminal({
         >
           {submitting ? "Starting…" : "Start export"}
         </button>
-        {exportStatus === "done" && downloadUrl ? (
+        {displayStatus === "done" && displayDownloadUrl ? (
           <a
-            href={downloadUrl}
+            href={displayDownloadUrl}
             download
             className="inline-flex items-center justify-center gap-2 rounded-lg border border-[#2a2a2e] py-2 text-sm text-white hover:border-[#7c3aed]"
           >
