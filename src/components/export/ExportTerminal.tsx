@@ -5,10 +5,15 @@ import { Download } from "lucide-react";
 import type { Export, ExportType, TimelineEvent } from "@/types/app";
 import { RemoteImage } from "@/components/shared/RemoteImage";
 import { cn } from "@/lib/cn";
+import {
+  PROJECT_API_UNAVAILABLE_MESSAGE,
+  readApiError,
+} from "@/lib/project-api";
 
 interface ExportTerminalProps {
   projectId: string;
   events: TimelineEvent[];
+  apiAvailable?: boolean;
   onExportUpdate?: (exp: Export) => void;
 }
 
@@ -33,6 +38,7 @@ function progressWidth(status: Export["status"] | null) {
 export function ExportTerminal({
   projectId,
   events,
+  apiAvailable = true,
   onExportUpdate,
 }: ExportTerminalProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -55,6 +61,10 @@ export function ExportTerminal({
   }
 
   async function startExport() {
+    if (!apiAvailable) {
+      setError(PROJECT_API_UNAVAILABLE_MESSAGE);
+      return;
+    }
     if (selected.size === 0) {
       setError("Select at least one event");
       return;
@@ -73,7 +83,9 @@ export function ExportTerminal({
           event_ids: Array.from(selected),
         }),
       });
-      if (!res.ok) throw new Error("Export failed to start");
+      if (!res.ok) {
+        throw new Error(await readApiError(res, "Export failed to start"));
+      }
       const { export: exp } = (await res.json()) as { export: Export };
       setCurrentExportId(exp.id);
       setExportStatus(exp.status);
@@ -119,6 +131,10 @@ export function ExportTerminal({
   return (
     <div className="space-y-4 p-1">
       <h3 className="text-sm font-semibold text-white">Export Terminal</h3>
+
+      {!apiAvailable ? (
+        <p className="text-xs text-[#9ca3af]">{PROJECT_API_UNAVAILABLE_MESSAGE}</p>
+      ) : null}
 
       <div className="flex flex-wrap gap-2">
         {EXPORT_TYPES.map((t) => (
@@ -184,7 +200,7 @@ export function ExportTerminal({
       <div className="flex flex-col gap-2">
         <button
           type="button"
-          disabled={submitting || selected.size === 0}
+          disabled={submitting || selected.size === 0 || !apiAvailable}
           onClick={startExport}
           className="rounded-lg bg-[#7c3aed] py-2 text-sm font-medium text-white disabled:opacity-50"
         >

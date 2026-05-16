@@ -1,17 +1,24 @@
 "use client";
 
 import {
+  forwardRef,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useMemo,
   useRef,
   useState,
+  type Dispatch,
+  type SetStateAction,
 } from "react";
 import { Stage, Layer, Line, Circle, Text, Group } from "react-konva";
 import type Konva from "konva";
 import type { LocationPin } from "@/types/app";
 import { GEN_STATUS_COLORS } from "@/lib/constants";
-import { broadcastCanvasOp } from "@/hooks/useRealtime";
+import {
+  broadcastCanvasOp,
+  type CanvasOpPayload,
+} from "@/hooks/useRealtime";
 import { cn } from "@/lib/cn";
 import { PinCreator } from "./PinCreator";
 
@@ -20,11 +27,16 @@ export type CanvasTool = "brush" | "pan";
 export interface GeographyCanvasProps {
   projectId: string;
   pins: LocationPin[];
-  onPinsChange: (pins: LocationPin[]) => void;
+  onPinsChange: Dispatch<SetStateAction<LocationPin[]>>;
   onPinSelect: (pin: LocationPin) => void;
   onCanvasChange: (konvaJson: object) => void;
   loading?: boolean;
   userId?: string;
+  apiAvailable?: boolean;
+}
+
+export interface GeographyCanvasHandle {
+  applyCanvasOp: (op: CanvasOpPayload) => void;
 }
 
 interface BrushLine {
@@ -39,15 +51,22 @@ function pinColor(status: LocationPin["gen_status"]) {
   return GEN_STATUS_COLORS[status] ?? "#F59E0B";
 }
 
-export function GeographyCanvas({
-  projectId,
-  pins,
-  onPinsChange,
-  onPinSelect,
-  onCanvasChange,
-  loading = false,
-  userId = "local",
-}: GeographyCanvasProps) {
+export const GeographyCanvas = forwardRef<
+  GeographyCanvasHandle,
+  GeographyCanvasProps
+>(function GeographyCanvas(
+  {
+    projectId,
+    pins,
+    onPinsChange,
+    onPinSelect,
+    onCanvasChange,
+    loading = false,
+    userId = "local",
+    apiAvailable = true,
+  },
+  ref,
+) {
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
   const [size, setSize] = useState({ width: 800, height: 600 });
@@ -61,6 +80,44 @@ export function GeographyCanvas({
     x: number;
     y: number;
   } | null>(null);
+
+  const applyCanvasOp = useCallback(
+    (op: CanvasOpPayload) => {
+      if (op.user_id === userId) return;
+
+      const points = op.payload.points;
+      if (!Array.isArray(points) || points.some((n) => typeof n !== "number")) {
+        return;
+      }
+
+      switch (op.op) {
+        case "add":
+        case "modify":
+          setLines((prev) => {
+            const idx = prev.findIndex((l) => l.id === op.object_id);
+            if (idx === -1) {
+              return [...prev, { id: op.object_id, points: points as number[] }];
+            }
+            return prev.map((line) =>
+              line.id === op.object_id
+                ? { ...line, points: points as number[] }
+                : line,
+            );
+          });
+          break;
+        case "delete":
+          setLines((prev) => prev.filter((l) => l.id !== op.object_id));
+          break;
+        case "cursor":
+          break;
+        default:
+          break;
+      }
+    },
+    [userId],
+  );
+
+  useImperativeHandle(ref, () => ({ applyCanvasOp }), [applyCanvasOp]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -186,10 +243,10 @@ export function GeographyCanvas({
 
   const handlePinCreated = useCallback(
     (pin: LocationPin) => {
-      onPinsChange([...pins, pin]);
+      onPinsChange((prev) => [...prev, pin]);
       setPinCreator(null);
     },
-    [pins, onPinsChange],
+    [onPinsChange],
   );
 
   const toolbar = useMemo(
@@ -306,10 +363,11 @@ export function GeographyCanvas({
           projectId={projectId}
           canvasX={pinCreator.x}
           canvasY={pinCreator.y}
+          apiAvailable={apiAvailable}
           onCreated={handlePinCreated}
           onCancel={() => setPinCreator(null)}
         />
       ) : null}
     </div>
   );
-}
+});

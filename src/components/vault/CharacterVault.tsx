@@ -1,16 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import { Loader2, Plus, Upload } from "lucide-react";
 import type { Character, CharacterRole } from "@/types/app";
 import { getVisualTraits } from "@/types/app";
 import { RemoteImage } from "@/components/shared/RemoteImage";
 import { cn } from "@/lib/cn";
+import {
+  PROJECT_API_UNAVAILABLE_MESSAGE,
+  readApiError,
+} from "@/lib/project-api";
 
 interface CharacterVaultProps {
   projectId: string;
   characters: Character[];
-  onCharactersChange: React.Dispatch<React.SetStateAction<Character[]>>;
+  apiAvailable?: boolean;
+  onCharactersChange: Dispatch<SetStateAction<Character[]>>;
 }
 
 const emptyTraits = {
@@ -23,6 +28,7 @@ const emptyTraits = {
 export function CharacterVault({
   projectId,
   characters,
+  apiAvailable = true,
   onCharactersChange,
 }: CharacterVaultProps) {
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +45,10 @@ export function CharacterVault({
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
+    if (!apiAvailable) {
+      setError(PROJECT_API_UNAVAILABLE_MESSAGE);
+      return;
+    }
     try {
       const res = await fetch(`/api/projects/${projectId}/characters`, {
         method: "POST",
@@ -50,7 +60,9 @@ export function CharacterVault({
           visual_traits: form.visual_traits,
         }),
       });
-      if (!res.ok) throw new Error("Failed to create character");
+      if (!res.ok) {
+        throw new Error(await readApiError(res, "Failed to create character"));
+      }
       const { character } = (await res.json()) as { character: Character };
       onCharactersChange((prev) => [...prev, character]);
       setShowForm(false);
@@ -75,7 +87,9 @@ export function CharacterVault({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error("Update failed");
+    if (!res.ok) {
+      throw new Error(await readApiError(res, "Update failed"));
+    }
     const { character } = (await res.json()) as { character: Character };
     onCharactersChange((prev) =>
       prev.map((c) => (c.id === id ? character : c)),
@@ -115,13 +129,17 @@ export function CharacterVault({
         <button
           type="button"
           onClick={() => setShowForm((v) => !v)}
-          className="inline-flex items-center gap-1 rounded-md bg-[#7c3aed] px-2 py-1 text-xs font-medium text-white"
+          disabled={!apiAvailable}
+          className="inline-flex items-center gap-1 rounded-md bg-[#7c3aed] px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
         >
           <Plus className="h-3 w-3" />
           Add
         </button>
       </div>
 
+      {!apiAvailable ? (
+        <p className="text-xs text-[#9ca3af]">{PROJECT_API_UNAVAILABLE_MESSAGE}</p>
+      ) : null}
       {error ? <p className="text-xs text-[#ef4444]">{error}</p> : null}
 
       {characters.length === 0 && !showForm ? (

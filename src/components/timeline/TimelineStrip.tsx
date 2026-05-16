@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import {
   DndContext,
   closestCenter,
@@ -17,17 +17,22 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Check, Loader2, Plus } from "lucide-react";
-import type { LocationPin, TimelineEvent } from "@/types/app";
-import type { Character } from "@/types/app";
+import type { LocationPin, TimelineEvent, Character } from "@/types/app";
 import { asGenStatus } from "@/types/app";
 import { GenStatusImage } from "@/components/shared/GenStatusImage";
 import { RemoteImage } from "@/components/shared/RemoteImage";
+import {
+  PROJECT_API_UNAVAILABLE_MESSAGE,
+  readApiError,
+} from "@/lib/project-api";
+
 interface TimelineStripProps {
   projectId: string;
   events: TimelineEvent[];
   pins: LocationPin[];
   characters: Character[];
-  onEventsChange: React.Dispatch<React.SetStateAction<TimelineEvent[]>>;
+  apiAvailable?: boolean;
+  onEventsChange: Dispatch<SetStateAction<TimelineEvent[]>>;
 }
 
 export function TimelineStrip({
@@ -35,10 +40,12 @@ export function TimelineStrip({
   events,
   pins,
   characters,
+  apiAvailable = true,
   onEventsChange,
 }: TimelineStripProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -51,6 +58,11 @@ export function TimelineStrip({
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
+    if (!apiAvailable) {
+      setError(PROJECT_API_UNAVAILABLE_MESSAGE);
+      return;
+    }
+    setError(null);
     const sequence_order =
       events.length > 0
         ? Math.max(...events.map((ev) => ev.sequence_order)) + 1
@@ -82,7 +94,9 @@ export function TimelineStrip({
           pin_id: form.pin_id || undefined,
         }),
       });
-      if (!res.ok) throw new Error("Create failed");
+      if (!res.ok) {
+        throw new Error(await readApiError(res, "Create failed"));
+      }
       const { event } = (await res.json()) as { event: TimelineEvent };
       onEventsChange((prev) =>
         [...prev.filter((ev) => ev.id !== optimistic.id), event].sort(
@@ -90,12 +104,14 @@ export function TimelineStrip({
         ),
       );
       setForm({ title: "", description: "", pin_id: "" });
-    } catch {
+    } catch (err) {
       onEventsChange((prev) => prev.filter((ev) => ev.id !== optimistic.id));
+      setError(err instanceof Error ? err.message : "Create failed");
     }
   }
 
   async function handleDragEnd(event: DragEndEvent) {
+    if (!apiAvailable) return;
     const { active, over } = event;
     if (!over || active.id === over.id) return;
     const oldIndex = events.findIndex((ev) => ev.id === active.id);
@@ -129,11 +145,15 @@ export function TimelineStrip({
 
   if (events.length === 0 && !showAdd) {
     return (
-      <div className="flex h-full items-center px-4">
+      <div className="flex h-full flex-col justify-center gap-2 px-4">
+        {!apiAvailable ? (
+          <p className="text-xs text-[#9ca3af]">{PROJECT_API_UNAVAILABLE_MESSAGE}</p>
+        ) : null}
         <button
           type="button"
           onClick={() => setShowAdd(true)}
-          className="text-sm text-[#9ca3af] hover:text-white"
+          disabled={!apiAvailable}
+          className="text-left text-sm text-[#9ca3af] hover:text-white disabled:opacity-50"
         >
           Add your first event →
         </button>
@@ -143,6 +163,9 @@ export function TimelineStrip({
 
   return (
     <div className="flex h-full flex-col">
+      {error ? (
+        <p className="px-4 pt-2 text-xs text-[#ef4444]">{error}</p>
+      ) : null}
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
