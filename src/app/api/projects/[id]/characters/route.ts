@@ -95,11 +95,21 @@ export async function POST(request: Request, context: RouteContext) {
           .single();
         return NextResponse.json({ character: updated ?? character }, { status: 201 });
       }
+      console.error(
+        "[characters POST] falQueue returned null — FAL_KEY likely missing",
+      );
     } catch (falErr) {
       console.error("[characters POST] falQueue failed:", falErr);
     }
 
-    return NextResponse.json({ character }, { status: 201 });
+    const { data: errored } = await supabase
+      .from("characters")
+      .update({ gen_status: "error" } satisfies CharacterUpdate)
+      .eq("id", character.id)
+      .select()
+      .single();
+
+    return NextResponse.json({ character: errored ?? character }, { status: 201 });
   } catch (err) {
     return jsonError(err instanceof Error ? err.message : "Unknown error");
   }
