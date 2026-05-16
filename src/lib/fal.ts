@@ -68,7 +68,13 @@ export async function falQueue(
   options: FalQueueOptions,
 ): Promise<FalQueueResult | null> {
   if (!FAL_KEY) {
-    console.warn("[fal] FAL_KEY not set — skipping image generation")
+    console.error(
+      "[fal] FAL_KEY env var is not set. Image generation is disabled. " +
+        "Set FAL_KEY in your Next.js environment (.env.local or Vercel Project " +
+        "Settings → Environment Variables) AND as a Supabase Edge Function secret " +
+        "(supabase secrets set FAL_KEY=...) — the Next.js route and the " +
+        "handle-fal-webhook function each read it independently.",
+    )
     return null
   }
 

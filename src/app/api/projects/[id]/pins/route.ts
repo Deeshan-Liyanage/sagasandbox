@@ -73,12 +73,23 @@ export async function POST(request: Request, context: RouteContext) {
 
         return NextResponse.json({ pin: updated ?? pin }, { status: 201 });
       }
+      // falQueue returned null → FAL_KEY not configured. Flip to "error"
+      // so the user gets a Retry button instead of forever-pending.
+      console.error(
+        "[pins POST] falQueue returned null — FAL_KEY likely missing",
+      );
     } catch (falErr) {
       console.error("[pins POST] falQueue failed:", falErr);
-      // Return pin without generation if fal fails
     }
 
-    return NextResponse.json({ pin }, { status: 201 });
+    const { data: errored } = await supabase
+      .from("location_pins")
+      .update({ gen_status: "error" } satisfies PinUpdate)
+      .eq("id", pin.id)
+      .select()
+      .single();
+
+    return NextResponse.json({ pin: errored ?? pin }, { status: 201 });
   } catch (err) {
     return jsonError(err instanceof Error ? err.message : "Unknown error");
   }

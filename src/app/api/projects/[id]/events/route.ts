@@ -78,7 +78,18 @@ async function triggerEventGeneration(
       .from("timeline_events")
       .update(updatePayload)
       .eq("id", event.id);
+    return;
   }
+
+  // falQueue returned null → FAL_KEY not configured. Mark the row so the
+  // user sees "Generation failed" + Retry instead of forever-pending.
+  console.error(
+    "[events POST] falQueue returned null — FAL_KEY likely missing",
+  );
+  await supabase
+    .from("timeline_events")
+    .update({ gen_status: "error" } satisfies EventUpdate)
+    .eq("id", event.id);
 }
 
 export async function GET(_request: Request, context: RouteContext) {
@@ -150,8 +161,15 @@ export async function POST(request: Request, context: RouteContext) {
         .eq("id", event.id)
         .single();
       return NextResponse.json({ event: updated ?? event }, { status: 201 });
-    } catch {
-      return NextResponse.json({ event }, { status: 201 });
+    } catch (genErr) {
+      console.error("[events POST] triggerEventGeneration failed:", genErr);
+      const { data: errored } = await supabase
+        .from("timeline_events")
+        .update({ gen_status: "error" } satisfies EventUpdate)
+        .eq("id", event.id)
+        .select()
+        .single();
+      return NextResponse.json({ event: errored ?? event }, { status: 201 });
     }
   } catch (err) {
     return jsonError(err instanceof Error ? err.message : "Unknown error");
