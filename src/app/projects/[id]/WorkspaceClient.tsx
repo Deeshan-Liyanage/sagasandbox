@@ -255,7 +255,6 @@ export function WorkspaceClient({
   });
 
 
-
   const vaultPane = useMemo(() => {
     if (panelsBooting) {
       return <PanelSkeleton rows={4} />;
