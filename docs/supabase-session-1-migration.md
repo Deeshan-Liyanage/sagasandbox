@@ -1,7 +1,7 @@
 # Session 1 — Supabase schema (applied)
 
 **Canonical agent playbook:** [sagasandbox_parallel_cursor_plan.md](./sagasandbox_parallel_cursor_plan.md) (Agent B sections B1–B10)  
-**Project ref:** `icxtuezwlivhjzjbqxnk`  
+**Project ref:** set via `NEXT_PUBLIC_SUPABASE_URL` in `.env.local` (Dashboard → Project Settings → General)  
 **Status:** Remote schema applied. Agent B committed repo types, fal helper, edge functions (deployed), and B4 exports bucket migration.
 
 **Vercel integration (managing agent):** [vercel-supabase-orchestrator.md](./integrations/vercel-supabase-orchestrator.md)
@@ -53,7 +53,7 @@ Team decision needed: switch buckets to public (simpler URLs) or keep private + 
 | `process-export` | v1 |
 | `cascade-regen` | v1 |
 
-Set Edge secrets: `FAL_KEY`, `ELEVENLABS_API_KEY` (Supabase Dashboard → Edge Functions → Secrets).
+Set Edge secrets: `FAL_KEY`, `ELEVENLABS_API_KEY`, optional `ELEVENLABS_DEFAULT_VOICE_ID` (Supabase Dashboard → Edge Functions → Secrets).
 
 ## B10 (demo audio)
 

@@ -48,6 +48,8 @@ export interface WorkspaceClientProps {
   initialEvents: TimelineEvent[];
   initialCharacters: Character[];
   userId?: string;
+  /** When false, mutation UIs stay disabled (e.g. mock demo workspace). */
+  apiAvailable?: boolean;
 }
 
 const CANVAS_PERSIST_MS = 800;
@@ -58,6 +60,7 @@ export function WorkspaceClient({
   initialEvents,
   initialCharacters,
   userId: initialUserId,
+  apiAvailable: apiAvailableProp,
 }: WorkspaceClientProps) {
   const [pins, setPins] = useState(initialPins);
   const [events, setEvents] = useState(initialEvents);
@@ -70,7 +73,8 @@ export function WorkspaceClient({
 
   const canvasRef = useRef<GeographyCanvasHandle>(null);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const apiAvailable = isProjectApiAvailable();
+  const apiAvailable =
+    apiAvailableProp ?? isProjectApiAvailable();
 
   const {
     selectedPin,

@@ -25,6 +25,7 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
         initialPins={getMockPins(id)}
         initialEvents={getMockEvents(id)}
         initialCharacters={getMockCharacters(id)}
+        apiAvailable={false}
       />
     )
   }
