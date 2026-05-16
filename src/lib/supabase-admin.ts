@@ -10,18 +10,24 @@ export function getSupabaseAdminKey(): string | undefined {
   );
 }
 
-/** Headers for invoking Supabase Edge Functions from Next.js API routes. */
+/**
+ * Headers for invoking Supabase Edge Functions from Next.js API routes.
+ *
+ * Both the new `sb_secret_...` keys and the legacy JWT `service_role`
+ * (`eyJ...`) keys require the `Authorization: Bearer <key>` header —
+ * without it the Functions gateway returns 401 before the function body
+ * ever runs. Previously this header was only added for JWT-shaped keys,
+ * which silently broke fal.ai webhook forwarding on projects that use
+ * the new secret-key format.
+ */
 export function getEdgeFunctionInvokeHeaders(
   adminKey: string,
 ): Record<string, string> {
-  const headers: Record<string, string> = {
+  return {
     "Content-Type": "application/json",
     apikey: adminKey,
+    Authorization: `Bearer ${adminKey}`,
   };
-  if (adminKey.startsWith("eyJ")) {
-    headers.Authorization = `Bearer ${adminKey}`;
-  }
-  return headers;
 }
 
 export function createAdminClient() {

@@ -1,31 +1,4 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
-
-function resolveSupabaseAdminKey() {
-  const secretKeysRaw = Deno.env.get("SUPABASE_SECRET_KEYS")
-  if (secretKeysRaw) {
-    try {
-      const secretKeys = JSON.parse(secretKeysRaw) as Record<string, string>
-      if (secretKeys.default) return secretKeys.default
-    } catch {
-      // Fall through to single-key env vars.
-    }
-  }
-
-  return (
-    Deno.env.get("SUPABASE_SECRET_KEY") ??
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
-    Deno.env.get("SUPABASE_SB_KEY")
-  )
-}
-
-const adminKey = resolveSupabaseAdminKey()
-if (!adminKey) {
-  throw new Error(
-    "Missing Supabase admin key (SUPABASE_SECRET_KEYS, SUPABASE_SECRET_KEY, or SUPABASE_SERVICE_ROLE_KEY)",
-  )
-}
-
-const supabase = createClient(Deno.env.get("SUPABASE_URL")!, adminKey)
+import { getAdminClient } from "../_shared/admin-client.ts"
 
 type StyleConfig = {
   aesthetic?: string
@@ -79,8 +52,26 @@ async function submitFal(prompt: string): Promise<string> {
 }
 
 Deno.serve(async (req) => {
+  let supabase
+  try {
+    supabase = getAdminClient()
+  } catch (err) {
+    console.error("[cascade-regen] init failed:", err)
+    return Response.json(
+      { error: err instanceof Error ? err.message : String(err) },
+      { status: 500 },
+    )
+  }
+
   try {
     const { project_id } = await req.json()
+
+    if (!Deno.env.get("FAL_KEY")) {
+      return Response.json(
+        { error: "FAL_KEY not configured for Edge Function" },
+        { status: 503 },
+      )
+    }
 
     const { data: project } = await supabase
       .from("projects")
