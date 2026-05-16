@@ -1,7 +1,39 @@
 import Link from "next/link";
-import { DEMO_PROJECT_ID } from "@/lib/mock-workspace";
+import { redirect } from "next/navigation";
 
-export default function Home() {
+import { DEMO_PROJECT_ID } from "@/lib/mock-workspace";
+import { isSupabaseConfigured } from "@/lib/supabase-env";
+import { createClient } from "@/lib/supabase-server";
+
+export default async function HomePage() {
+  if (!isSupabaseConfigured()) {
+    return <DemoLanding />;
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  const demoName = "The Obsidian Covenant";
+  const { data: demo } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("name", demoName)
+    .maybeSingle();
+
+  if (demo?.id) {
+    redirect(`/projects/${demo.id}`);
+  }
+
+  redirect("/projects");
+}
+
+function DemoLanding() {
   return (
     <div className="flex min-h-full flex-col items-center justify-center bg-[#0f0f12] px-6 py-16 text-[#e5e7eb]">
       <main className="mx-auto flex w-full max-w-lg flex-col items-center gap-8 text-center">
@@ -13,8 +45,8 @@ export default function Home() {
         </h1>
         <p className="text-sm leading-relaxed text-[#9ca3af]">
           Map geography, sequence events on a timeline, and catalog characters in
-          a collaborative studio workspace. Preview uses seeded mock data until
-          backend APIs are connected.
+          a collaborative studio workspace. Connect Supabase to persist projects;
+          until then, explore the demo workspace.
         </p>
         <Link
           href={`/projects/${DEMO_PROJECT_ID}`}
@@ -29,3 +61,4 @@ export default function Home() {
     </div>
   );
 }
+
