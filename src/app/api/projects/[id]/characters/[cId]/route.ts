@@ -69,13 +69,11 @@ export async function PATCH(request: Request, context: RouteContext) {
         try {
           const result = await falQueue({ prompt, model: "fal-ai/flux/dev" });
           if (result) {
-            const updatePayload: Record<string, string> = {
+            const updatePayload: CharacterUpdate = {
               gen_status: result.imageUrl ? "done" : "generating",
               fal_request_id: result.requestId,
+              ...(result.imageUrl ? { generated_portrait_url: result.imageUrl } : {}),
             };
-            if (result.imageUrl) {
-              updatePayload.generated_portrait_url = result.imageUrl;
-            }
             await supabase.from("characters").update(updatePayload).eq("id", character.id);
           }
         } catch (falErr) {
