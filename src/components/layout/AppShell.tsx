@@ -7,6 +7,7 @@ import {
   Users,
   FileOutput,
 } from "lucide-react";
+import { LogoutButton } from "@/components/auth/LogoutButton";
 import { cn } from "@/lib/cn";
 import { themeAccent } from "@/lib/constants";
 
@@ -63,6 +64,7 @@ export function AppShell({
         </div>
         <div className="flex items-center gap-2">
           {headerActions}
+          <LogoutButton iconOnly />
           <button
             type="button"
             onClick={onExportClick}
