@@ -31,8 +31,10 @@ export default async function ProjectsPage() {
     .select("project_id")
     .eq("user_id", user.id)
 
+  const ownedList = owned ?? []
+  const ownedIds = new Set(ownedList.map((p) => p.id))
   const memberIds =
-    memberRows?.map((r) => r.project_id).filter((id) => id !== user.id) ?? []
+    memberRows?.map((r) => r.project_id).filter((id) => !ownedIds.has(id)) ?? []
 
   const { data: shared } =
     memberIds.length > 0
@@ -42,7 +44,7 @@ export default async function ProjectsPage() {
           .in("id", memberIds)
       : { data: [] }
 
-  const projects = [...(owned ?? []), ...(shared ?? [])]
+  const projects = [...ownedList, ...(shared ?? [])]
 
   return (
     <div className="min-h-screen bg-[#0e0e0f] px-6 py-10 text-[#e5e7eb]">
