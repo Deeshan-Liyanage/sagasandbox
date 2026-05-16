@@ -3,3 +3,8 @@
 
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
+
+## Git (agents)
+
+- Branch names: `.cursor/rules/Branch-Naming.mdc` (Conventional Branches; never commit on `main`).
+- **Commit at milestones** without waiting for the user: `.cursor/rules/Agent-Milestone-Commits.mdc` (Conventional Commits; push only when asked).

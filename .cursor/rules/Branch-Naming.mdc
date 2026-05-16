@@ -49,7 +49,10 @@ refactor/vault-store-split
 2. Pick `type` from the **upcoming commit’s** primary intent (same type you would use in the commit subject).
 3. If the branch will hold multiple unrelated changes, split into separate branches instead of one broad name.
 4. Before pushing, confirm the branch name matches this pattern; rename with `git branch -m` if needed.
+5. **Commit at milestones** while working — see [Agent-Milestone-Commits.mdc](Agent-Milestone-Commits.mdc). Do not wait for the user to ask for a commit.
 
 ## Pairing with commits
 
-Branch type should match the **dominant** commit type on that branch. Commits on the branch still follow Conventional Commits, e.g. `feat(timeline): add ghost nodes for copilot suggestions`.
+Branch type should match the **dominant** commit type on that branch. Every milestone commit uses full Conventional Commits format (types, optional scope, imperative subject) as defined in [Agent-Milestone-Commits.mdc](Agent-Milestone-Commits.mdc).
+
+Example: `feat(timeline): add ghost nodes for copilot suggestions`
