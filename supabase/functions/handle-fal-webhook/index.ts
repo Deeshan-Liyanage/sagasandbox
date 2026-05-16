@@ -1,36 +1,118 @@
-import { getAdminClient } from "../_shared/admin-client.ts"
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
-type FalImageOutput = {
-  images?: Array<{ url?: string }>
-  image?: { url?: string }
+function resolveSupabaseAdminKey() {
+  const secretKeysRaw = Deno.env.get("SUPABASE_SECRET_KEYS")
+  if (secretKeysRaw) {
+    try {
+      const secretKeys = JSON.parse(secretKeysRaw) as Record<string, string>
+      if (secretKeys.default) return secretKeys.default
+    } catch {
+      // Fall through to single-key env vars.
+    }
+  }
+
+  return (
+    Deno.env.get("SUPABASE_SECRET_KEY") ??
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
+    Deno.env.get("SUPABASE_SB_KEY")
+  )
 }
 
-/** Shape of the POST body fal.ai sends to the webhook URL. */
-type FalWebhookBody = {
-  request_id: string
-  /** "OK" on success, "ERROR" on failure. */
-  status: "OK" | "ERROR" | string
-  /** Present when status === "OK" — the model's raw output object. */
-  payload?: FalImageOutput
-  /** Present when status === "ERROR". */
+const adminKey = resolveSupabaseAdminKey()
+if (!adminKey) {
+  throw new Error(
+    "Missing Supabase admin key (SUPABASE_SECRET_KEYS, SUPABASE_SECRET_KEY, or SUPABASE_SERVICE_ROLE_KEY)",
+  )
+}
+
+const supabase = createClient(Deno.env.get("SUPABASE_URL")!, adminKey)
+
+type FalWebhookPayload = {
+  request_id?: string
+  requestId?: string
+  status: string
+  payload?: {
+    images?: Array<{ url?: string }>
+    image?: { url?: string }
+  }
+  output?: {
+    images?: Array<{ url?: string }>
+    image?: { url?: string }
+  }
   error?: string
 }
 
-Deno.serve(async (req) => {
-  let supabase
-  try {
-    supabase = getAdminClient()
-  } catch (err) {
-    console.error("[fal-webhook] init failed:", err)
-    return Response.json(
-      { error: err instanceof Error ? err.message : String(err) },
-      { status: 500 },
-    )
-  }
+function getFalImageUrl(body: FalWebhookPayload): string | null {
+  const data = body.payload ?? body.output
+  return data?.images?.[0]?.url ?? data?.image?.url ?? null
+}
 
+function patchSceneryState(
+  state: Record<string, unknown>,
+  metaPatch: Record<string, unknown>,
+): Record<string, unknown> {
+  if (state.stage && typeof state.stage === "object") {
+    const prevMeta =
+      typeof state.meta === "object" && state.meta !== null
+        ? (state.meta as Record<string, unknown>)
+        : {}
+    return { ...state, meta: { ...prevMeta, ...metaPatch } }
+  }
+  if (state.className === "Stage") {
+    return { ...state, ...metaPatch }
+  }
+  const prevMeta =
+    typeof state.meta === "object" && state.meta !== null
+      ? (state.meta as Record<string, unknown>)
+      : {}
+  return { ...state, meta: { ...prevMeta, ...metaPatch } }
+}
+
+async function findSceneryProject(requestId: string) {
+  const { data: byMeta } = await supabase
+    .from("projects")
+    .select("id, canvas_state")
+    .filter("canvas_state->meta->>scenery_fal_request_id", "eq", requestId)
+    .maybeSingle()
+
+  if (byMeta) return byMeta
+
+  const { data: byRoot } = await supabase
+    .from("projects")
+    .select("id, canvas_state")
+    .filter("canvas_state->>scenery_fal_request_id", "eq", requestId)
+    .maybeSingle()
+
+  return byRoot
+}
+
+async function markSceneryError(requestId: string) {
+  const sceneryProject = await findSceneryProject(requestId)
+  if (!sceneryProject?.canvas_state) return
+
+  const nextState = patchSceneryState(
+    sceneryProject.canvas_state as Record<string, unknown>,
+    {
+      scenery_preview_url: "error",
+      scenery_fal_request_id: null,
+    },
+  )
+
+  await supabase
+    .from("projects")
+    .update({ canvas_state: nextState })
+    .eq("id", sceneryProject.id)
+}
+
+Deno.serve(async (req) => {
   try {
-    const body = (await req.json()) as FalWebhookBody
-    const { request_id, status, payload: falOutput } = body
+    const body = (await req.json()) as FalWebhookPayload
+    const request_id = body.request_id ?? body.requestId
+    const { status } = body
+
+    if (!request_id) {
+      return Response.json({ error: "missing request_id" }, { status: 400 })
+    }
 
     const { data: pin } = await supabase
       .from("location_pins")
@@ -51,7 +133,6 @@ Deno.serve(async (req) => {
       .maybeSingle()
 
     if (status === "ERROR") {
-      console.error(`[fal-webhook] request_id=${request_id} ERROR`)
       if (pin && pin.gen_status !== "done") {
         await supabase
           .from("location_pins")
@@ -70,49 +151,39 @@ Deno.serve(async (req) => {
           .update({ gen_status: "error" })
           .eq("id", character.id)
       }
-
-      const { data: sceneryProject } = await supabase
-        .from("projects")
-        .select("id, canvas_state")
-        .filter("canvas_state->_saga->>scenery_request_id", "eq", request_id)
-        .maybeSingle()
-
-      if (sceneryProject?.canvas_state && typeof sceneryProject.canvas_state === "object") {
-        const state = sceneryProject.canvas_state as Record<string, unknown>
-        const saga =
-          state._saga && typeof state._saga === "object" && !Array.isArray(state._saga)
-            ? { ...(state._saga as Record<string, unknown>) }
-            : {}
-        saga.scenery_preview_url = null
-        await supabase
-          .from("projects")
-          .update({ canvas_state: { ...state, _saga: saga } })
-          .eq("id", sceneryProject.id)
-      }
-
+      await markSceneryError(request_id)
       return Response.json({ ok: true })
     }
 
-    if (status !== "OK") {
-      console.warn(`[fal-webhook] request_id=${request_id} unexpected status=${status}`)
-      return Response.json({ ok: true })
-    }
+    if (status !== "OK") return Response.json({ ok: true })
 
-    const imageUrl = falOutput?.images?.[0]?.url ?? falOutput?.image?.url
+    const imageUrl = getFalImageUrl(body)
     if (!imageUrl) {
-      console.error(`[fal-webhook] request_id=${request_id} no image url in payload`, JSON.stringify(falOutput))
+      await markSceneryError(request_id)
       return Response.json({ error: "no image url" }, { status: 400 })
     }
 
-    console.log(`[fal-webhook] request_id=${request_id} imageUrl=${imageUrl}`)
+    const imgResponse = await fetch(imageUrl)
+    if (!imgResponse.ok) {
+      await markSceneryError(request_id)
+      return Response.json({ error: "failed to download image" }, { status: 502 })
+    }
 
-    // Store the fal.ai CDN URL directly — simpler and avoids an extra fetch+upload round-trip.
-    // The images bucket is public so previously uploaded files remain accessible too.
+    const blob = await imgResponse.blob()
+    const fileName = `generated/${request_id}.jpg`
+
+    await supabase.storage
+      .from("images")
+      .upload(fileName, blob, { contentType: "image/jpeg", upsert: true })
+
+    const { data: publicUrl } = supabase.storage.from("images").getPublicUrl(fileName)
+    const storageUrl = publicUrl.publicUrl
+
     if (pin && pin.gen_status !== "done") {
       await supabase
         .from("location_pins")
         .update({
-          generated_image_url: imageUrl,
+          generated_image_url: storageUrl,
           gen_status: "done",
         })
         .eq("id", pin.id)
@@ -122,7 +193,7 @@ Deno.serve(async (req) => {
       await supabase
         .from("timeline_events")
         .update({
-          generated_image_url: imageUrl,
+          generated_image_url: storageUrl,
           gen_status: "done",
         })
         .eq("id", event.id)
@@ -132,29 +203,26 @@ Deno.serve(async (req) => {
       await supabase
         .from("characters")
         .update({
-          generated_portrait_url: imageUrl,
+          generated_portrait_url: storageUrl,
           gen_status: "done",
         })
         .eq("id", character.id)
     }
 
-    // Canvas scenery synthesis (stored in projects.canvas_state._saga)
-    const { data: sceneryProject } = await supabase
-      .from("projects")
-      .select("id, canvas_state")
-      .filter("canvas_state->_saga->>scenery_request_id", "eq", request_id)
-      .maybeSingle()
+    const sceneryProject = await findSceneryProject(request_id)
 
-    if (sceneryProject?.canvas_state && typeof sceneryProject.canvas_state === "object") {
-      const state = sceneryProject.canvas_state as Record<string, unknown>
-      const saga =
-        state._saga && typeof state._saga === "object" && !Array.isArray(state._saga)
-          ? { ...(state._saga as Record<string, unknown>) }
-          : {}
-      saga.scenery_preview_url = imageUrl
+    if (sceneryProject?.canvas_state) {
+      const nextState = patchSceneryState(
+        sceneryProject.canvas_state as Record<string, unknown>,
+        {
+          scenery_preview_url: storageUrl,
+          scenery_fal_request_id: null,
+        },
+      )
+
       await supabase
         .from("projects")
-        .update({ canvas_state: { ...state, _saga: saga } })
+        .update({ canvas_state: nextState })
         .eq("id", sceneryProject.id)
     }
 

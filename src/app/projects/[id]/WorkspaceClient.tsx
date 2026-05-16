@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { AppShell, type SidebarNav } from "@/components/layout/AppShell";
+import { AppShell } from "@/components/layout/AppShell";
 import { ProjectSettingsModal } from "@/components/layout/ProjectSettingsModal";
 import { HistorySidebar } from "@/components/history/HistorySidebar";
 import { CopilotPanel } from "@/components/copilot/CopilotPanel";
@@ -21,6 +21,7 @@ import type { GeographyCanvasHandle } from "@/components/canvas/GeographyCanvas"
 import { useProjectRealtime } from "@/hooks/useRealtime";
 import type { CanvasOpPayload } from "@/hooks/useRealtime";
 import { useStuckGenerationRecovery } from "@/hooks/useStuckGenerationRecovery";
+import { useWorkspacePanes } from "@/hooks/useWorkspacePanes";
 import { useUIStore } from "@/store/ui-store";
 import { toastError } from "@/store/toast-store";
 import { History, Settings, Sparkles } from "lucide-react";
@@ -82,7 +83,6 @@ export function WorkspaceClient({
   const [pins, setPins] = useState(initialPins);
   const [events, setEvents] = useState(initialEvents);
   const [characters, setCharacters] = useState(initialCharacters);
-  const [activeNav, setActiveNav] = useState<SidebarNav>("canvas");
   const [userId, setUserId] = useState(initialUserId ?? "local");
   const [canvasHydrating, setCanvasHydrating] = useState(true);
   const [panelsBooting, setPanelsBooting] = useState(true);
@@ -108,6 +108,19 @@ export function WorkspaceClient({
 
   const highlightedPinId = useUIStore((s) => s.highlightedPinId);
   const accent = themeAccent(projectState.theme);
+
+  const {
+    paneVisibility,
+    togglePane,
+    setPaneVisible,
+    applyPreset,
+  } = useWorkspacePanes(project.id);
+
+  const handleTogglePane = togglePane;
+
+  const openExportPane = useCallback(() => {
+    setPaneVisible("export", true);
+  }, [setPaneVisible]);
 
   useEffect(() => {
     const id = requestAnimationFrame(() => setPanelsBooting(false));
@@ -241,63 +254,131 @@ export function WorkspaceClient({
     apiAvailable,
   });
 
-  const sidebarContent = useMemo(() => {
+  const vaultPane = useMemo(() => {
     if (panelsBooting) {
-      if (sidebarMode === "vault" || activeNav === "vault") {
-        return <PanelSkeleton rows={4} />;
-      }
-      if (sidebarMode === "export" || activeNav === "export") {
-        return <PanelSkeleton rows={3} />;
-      }
-    }
-    if (sidebarMode === "vault") {
-      return (
-        <CharacterVault
-          projectId={project.id}
-          characters={characters}
-          apiAvailable={apiAvailable}
-          onCharactersChange={setCharacters}
-        />
-      );
-    }
-    if (sidebarMode === "export") {
-      return (
-        <ExportTerminal
-          projectId={project.id}
-          events={events}
-          apiAvailable={apiAvailable}
-          liveExport={liveExport}
-          realtimeActive={isSupabaseConfigured()}
-        />
-      );
+      return <PanelSkeleton rows={4} />;
     }
     return (
-      <p className="text-xs text-[#9ca3af]">
-        Use the nav to open Character Vault or Export — or click a pin on the
-        canvas.
-      </p>
+      <CharacterVault
+        projectId={project.id}
+        characters={characters}
+        apiAvailable={apiAvailable}
+        onCharactersChange={setCharacters}
+      />
     );
-  }, [
-    panelsBooting,
-    sidebarMode,
-    activeNav,
-    project.id,
-    characters,
-    events,
-    apiAvailable,
-    liveExport,
-  ]);
+  }, [panelsBooting, project.id, characters, apiAvailable]);
+
+  const exportPane = useMemo(() => {
+    if (panelsBooting) {
+      return <PanelSkeleton rows={3} />;
+    }
+    return (
+      <ExportTerminal
+        projectId={project.id}
+        events={events}
+        apiAvailable={apiAvailable}
+        liveExport={liveExport}
+        realtimeActive={isSupabaseConfigured()}
+      />
+    );
+  }, [panelsBooting, project.id, events, apiAvailable, liveExport]);
+
+  const canvasContent = useMemo(
+    () => (
+      <ErrorBoundary>
+        {isDemo ? (
+          <p className="border-b border-[#7c3aed]/40 bg-[#7c3aed]/10 px-4 py-2 text-center text-xs text-[#e5e7eb]">
+            Demo workspace (read-only).{" "}
+            <Link
+              href="/projects"
+              className="font-medium text-[#a78bfa] underline-offset-2 hover:underline"
+            >
+              Open or create a project
+            </Link>{" "}
+            to save canvas, timeline, and vault changes.
+          </p>
+        ) : !apiAvailable ? (
+          <p className="border-b border-[#2a2a2e] bg-[#1a1a1e] px-4 py-2 text-center text-xs text-[#9ca3af]">
+            {PROJECT_API_UNAVAILABLE_MESSAGE}
+          </p>
+        ) : null}
+        <GeographyCanvas
+          ref={canvasRef}
+          projectId={projectState.id}
+          pins={pins}
+          userId={userId}
+          apiAvailable={apiAvailable}
+          highlightedPinId={highlightedPinId}
+          initialCanvasState={initialCanvasState}
+          loading={canvasHydrating}
+          onHydrated={() => setCanvasHydrating(false)}
+          onPinsChange={setPins}
+          onPinSelect={(pin) => {
+            setSelectedPin(pin);
+            setSidebarMode("pin");
+          }}
+          onCanvasChange={handleCanvasChange}
+        />
+      </ErrorBoundary>
+    ),
+    [
+      isDemo,
+      apiAvailable,
+      projectState.id,
+      pins,
+      userId,
+      highlightedPinId,
+      initialCanvasState,
+      canvasHydrating,
+      handleCanvasChange,
+      setSelectedPin,
+      setSidebarMode,
+    ],
+  );
+
+  const timelineContent = useMemo(
+    () =>
+      panelsBooting ? (
+        <TimelineSkeleton />
+      ) : (
+        <TimelineStrip
+          projectId={projectState.id}
+          events={events}
+          pins={pins}
+          characters={characters}
+          apiAvailable={apiAvailable}
+          onEventsChange={setEvents}
+          onPinSelect={(pin) => setSelectedPin(pin)}
+        />
+      ),
+    [
+      panelsBooting,
+      projectState.id,
+      events,
+      pins,
+      characters,
+      apiAvailable,
+      setSelectedPin,
+    ],
+  );
 
   return (
     <div
       className="h-screen"
-      style={{ ["--accent" as string]: accent }}
+      style={{ ["--accent" as string]: accent } as CSSProperties}
     >
       <ToastHost />
       <AppShell
+        projectId={project.id}
         projectName={projectState.name}
         theme={projectState.theme}
-        activeNav={activeNav}
+        paneVisibility={paneVisibility}
+        onTogglePane={handleTogglePane}
+        onApplyLayoutPreset={applyPreset}
+        canvasContent={canvasContent}
+        timelineContent={timelineContent}
+        vaultContent={vaultPane}
+        exportContent={exportPane}
         headerActions={
           apiAvailable && !isDemo ? (
             <>
@@ -328,69 +409,8 @@ export function WorkspaceClient({
             </>
           ) : null
         }
-        onNavChange={(nav) => {
-          setActiveNav(nav);
-          if (nav === "vault") setSidebarMode("vault");
-          else if (nav === "export") setSidebarMode("export");
-          else setSidebarMode(null);
-        }}
-        onExportClick={() => setSidebarMode("export")}
-        sidebarContent={sidebarContent}
-        timelineContent={
-          panelsBooting ? (
-            <TimelineSkeleton />
-          ) : (
-            <TimelineStrip
-              projectId={projectState.id}
-              events={events}
-              pins={pins}
-              characters={characters}
-              apiAvailable={apiAvailable}
-              onEventsChange={setEvents}
-              onPinSelect={(pin) => setSelectedPin(pin)}
-            />
-          )
-        }
-      >
-        <ErrorBoundary>
-          {isDemo ? (
-            <p className="border-b border-[#7c3aed]/40 bg-[#7c3aed]/10 px-4 py-2 text-center text-xs text-[#e5e7eb]">
-              Demo workspace (read-only).{" "}
-              <Link
-                href="/projects"
-                className="font-medium text-[#a78bfa] underline-offset-2 hover:underline"
-              >
-                Open or create a project
-              </Link>{" "}
-              to save canvas, timeline, and vault changes.
-            </p>
-          ) : !apiAvailable ? (
-            <p className="border-b border-[#2a2a2e] bg-[#1a1a1e] px-4 py-2 text-center text-xs text-[#9ca3af]">
-              {PROJECT_API_UNAVAILABLE_MESSAGE}
-            </p>
-          ) : null}
-          <GeographyCanvas
-            ref={canvasRef}
-            projectId={projectState.id}
-            pins={pins}
-            userId={userId}
-            apiAvailable={apiAvailable}
-            highlightedPinId={highlightedPinId}
-            initialCanvasState={
-              (projectState.canvas_state as Record<string, unknown> | null) ??
-              initialCanvasState
-            }
-            loading={canvasHydrating}
-            onHydrated={() => setCanvasHydrating(false)}
-            onPinsChange={setPins}
-            onPinSelect={(pin) => {
-              setSelectedPin(pin);
-              setSidebarMode("pin");
-            }}
-            onCanvasChange={handleCanvasChange}
-          />
-        </ErrorBoundary>
-      </AppShell>
+        onExportClick={openExportPane}
+      />
 
       {sidebarMode === "pin" && selectedPin ? (
         <PinSidebar
@@ -432,3 +452,7 @@ export function WorkspaceClient({
     </div>
   );
 }
+
+
+
+

@@ -17,6 +17,8 @@ export async function PATCH(request: Request, context: RouteContext) {
     const body = (await request.json()) as {
       label?: string;
       description?: string;
+      canvas_x?: number;
+      canvas_y?: number;
     };
 
     const { data: existing } = await supabase
@@ -33,6 +35,8 @@ export async function PATCH(request: Request, context: RouteContext) {
     const updates: PinUpdate = {};
     if (body.label !== undefined) updates.label = body.label;
     if (body.description !== undefined) updates.description = body.description;
+    if (body.canvas_x !== undefined) updates.canvas_x = body.canvas_x;
+    if (body.canvas_y !== undefined) updates.canvas_y = body.canvas_y;
 
     const descriptionChanged =
       body.description !== undefined && body.description !== existing.description;

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isAuthError, jsonError, requireAuth } from "@/lib/api-auth";
-import { mergeKonvaStatePreservingMeta } from "@/lib/canvas-meta";
+import { mergeCanvasStateForPersist } from "@/lib/canvas-state";
 import type { Json } from "@/types/db";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -27,7 +27,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       .eq("id", id)
       .single();
 
-    const merged = mergeKonvaStatePreservingMeta(
+    const merged = mergeCanvasStateForPersist(
       existing?.canvas_state as Record<string, unknown> | null,
       body.canvas_state,
     );
