@@ -11,7 +11,7 @@ interface RemoteImageProps {
   className?: string;
 }
 
-/** External/generated URLs (Fal, Supabase storage) — unoptimized until remotePatterns are set. */
+/** External/generated URLs (Fal CDN, Supabase Storage) — remotePatterns are configured in next.config.ts. */
 export function RemoteImage({
   src,
   alt,
@@ -25,7 +25,6 @@ export function RemoteImage({
       alt={alt}
       width={width}
       height={height}
-      unoptimized
       className={cn(className)}
     />
   );
