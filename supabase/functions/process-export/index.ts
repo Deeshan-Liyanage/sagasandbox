@@ -38,7 +38,7 @@ Deno.serve(async (req) => {
     if (exportRow.type === "storyboard_pdf") {
       await processStoryboardPdf(export_id, exportRow.project_id, events ?? [])
     } else if (exportRow.type === "audio_script") {
-      await processAudioScript(export_id, events ?? [])
+      await processAudioScript(export_id, exportRow.project_id, events ?? [])
     }
 
     await supabase.from("exports").update({ status: "done" }).eq("id", export_id)
@@ -86,13 +86,13 @@ async function processStoryboardPdf(
 /** Voices from fal-ai/kokoro that suit cinematic narration. */
 const NARRATOR_VOICES = ["am_echo", "am_eric", "am_michael", "af_sarah", "af_nova"]
 
-async function kokoro(text: string, voiceIndex: number): Promise<string | null> {
+async function kokoro(text: string, voiceIndex: number, voiceOverride?: string): Promise<string | null> {
   if (!FAL_KEY) {
     console.warn("FAL_KEY not set — skipping TTS for event")
     return null
   }
 
-  const voice = NARRATOR_VOICES[voiceIndex % NARRATOR_VOICES.length]
+  const voice = voiceOverride ?? NARRATOR_VOICES[voiceIndex % NARRATOR_VOICES.length]
 
   let attempt = 0
   while (attempt < 3) {
@@ -121,17 +121,36 @@ async function kokoro(text: string, voiceIndex: number): Promise<string | null> 
   return null
 }
 
-async function processAudioScript(exportId: string, events: TimelineEventRow[]) {
+async function processAudioScript(exportId: string, projectId: string, events: TimelineEventRow[]) {
+  // Build a name→voice map from characters in this project so voice_id
+  // (a Kokoro voice name) can be resolved per-event by character mention.
+  const { data: characters } = await supabase
+    .from("characters")
+    .select("name, voice_id")
+    .eq("project_id", projectId)
+
+  const voiceMap = new Map<string, string>()
+  for (const c of characters ?? []) {
+    if (c.voice_id) voiceMap.set(c.name.toLowerCase(), c.voice_id)
+  }
+
   const audioUrls: string[] = []
 
   for (let i = 0; i < events.length; i++) {
     const event = events[i]
     const text = event.description ?? event.title
 
+    // Resolve Kokoro voice: first character mentioned in text wins, else rotate.
+    const matchedVoice = [...voiceMap.entries()]
+      .find(([name]) => text.toLowerCase().includes(name))?.[1]
+    const voiceOverride = matchedVoice && NARRATOR_VOICES.includes(matchedVoice)
+      ? matchedVoice
+      : undefined
+
     // 500 ms gap between calls to stay within rate limits
     if (i > 0) await new Promise((r) => setTimeout(r, 500))
 
-    const audioUrl = await kokoro(text, i)
+    const audioUrl = await kokoro(text, i, voiceOverride)
 
     if (audioUrl) {
       // Download from fal CDN and persist in Supabase Storage so the URL
