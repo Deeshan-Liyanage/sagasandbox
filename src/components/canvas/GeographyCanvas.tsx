@@ -84,7 +84,7 @@ export const GeographyCanvas = forwardRef<
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
   const cursorThrottleRef = useRef(0);
-  const hydratedRef = useRef(false);
+  const hydratedStateKeyRef = useRef<string | null>(null);
   const [size, setSize] = useState({ width: 800, height: 600 });
   const [tool, setTool] = useState<CanvasTool>("brush");
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 });
@@ -169,8 +169,9 @@ export const GeographyCanvas = forwardRef<
   );
 
   useEffect(() => {
-    if (hydratedRef.current) return;
-    hydratedRef.current = true;
+    const stateKey = JSON.stringify(initialCanvasState ?? null);
+    if (hydratedStateKeyRef.current === stateKey) return;
+    hydratedStateKeyRef.current = stateKey;
     hydrateFromState(initialCanvasState);
   }, [initialCanvasState, hydrateFromState]);
 
@@ -424,11 +425,11 @@ export const GeographyCanvas = forwardRef<
             <Group key={`cursor-${peerId}`} x={cursor.x} y={cursor.y}>
               <Circle radius={6} fill="#10b981" stroke="#0e0e0f" strokeWidth={2} />
               <Text
-                text={`@${peerId.slice(0, 6)}`}
+                text="Collaborator"
                 fontSize={10}
                 fill="#10b981"
                 y={10}
-                offsetX={18}
+                offsetX={28}
               />
             </Group>
           ))}
