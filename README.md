@@ -19,9 +19,13 @@ Copy [`.env.example`](.env.example) to `.env.local` and fill in keys as features
 
 Vercel Hobby only allows the project owner to deploy from a private repo via native Git integration. This project uses **GitHub Actions** with the owner's Vercel token so **any collaborator** can trigger deploys without a Vercel account.
 
+### Branch naming
+
+Name branches like Conventional Commits: `<type>/<short-description>` (e.g. `feat/timeline-pins`, `fix/canvas-sync`, `ci/vercel-deploy`). Agents and contributors should follow [`.cursor/rules/Branch-Naming.mdc`](.cursor/rules/Branch-Naming.mdc). Do not push directly to `main`.
+
 ### Workflow
 
-1. Push your branch and open a **pull request** against `main`.
+1. Create a properly named branch from `main`, push it, and open a **pull request**.
 2. The [Vercel Deploy](.github/workflows/vercel-deploy.yml) workflow runs and posts a **preview URL** on the PR.
 3. After review, merge to `main` → production deploys to https://sagasandbox.vercel.app.
 

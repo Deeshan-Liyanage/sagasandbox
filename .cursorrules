@@ -5,3 +5,5 @@
 - Database mapping uses **Prisma ORM** pointing to PostgreSQL (Supabase).
 - Local states use **Zustand**.
 - Run `npm run dev` or build checks whenever you modify layout configurations to verify the TypeScript types resolve flawlessly.
+- Use conventional commits for commit messages.
+- Use conventional branch names: `<type>/<short-description>` (same types as commits). See `.cursor/rules/Branch-Naming.mdc`. Never commit directly to `main`; use a PR.

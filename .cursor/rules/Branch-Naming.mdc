@@ -1,0 +1,55 @@
+---
+description: Branch naming aligned with Conventional Commits for agents and collaborators
+alwaysApply: true
+---
+
+# Branch naming (Conventional Branches)
+
+Use the same **type** vocabulary as [Conventional Commits](https://www.conventionalcommits.org/). Branch names must be lowercase, kebab-case, and ASCII.
+
+## Format
+
+```
+<type>/<short-description>
+```
+
+Optional scope (use when it clarifies the area):
+
+```
+<type>/<scope>-<short-description>
+```
+
+| Part | Rules |
+|------|--------|
+| `type` | Required. One of: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore` |
+| `scope` | Optional. Short area: `canvas`, `timeline`, `vault`, `copilot`, `export`, `api`, `db`, `ui` |
+| `short-description` | 2–5 words, kebab-case, no spaces |
+
+## Examples
+
+```
+feat/timeline-event-pins
+fix/canvas-pin-sync
+docs/collaborator-deploy-guide
+ci/vercel-preview-workflow
+chore/deps-next-16
+refactor/vault-store-split
+```
+
+## Do not use
+
+- `main`, `master`, `develop` (except `main` as the protected default branch)
+- Vague names: `update`, `fixes`, `wip`, `test-branch`, `john-work`
+- Uppercase, underscores, or slashes beyond the first: `Feat/foo`, `feat/my_branch`, `feat/foo/bar`
+- Personal or date prefixes: `dinura-05-16`, `feature-123` (use ticket in commit body instead)
+
+## Agent workflow
+
+1. **Never** commit directly to `main`. Branch from latest `main`, then open a PR.
+2. Pick `type` from the **upcoming commit’s** primary intent (same type you would use in the commit subject).
+3. If the branch will hold multiple unrelated changes, split into separate branches instead of one broad name.
+4. Before pushing, confirm the branch name matches this pattern; rename with `git branch -m` if needed.
+
+## Pairing with commits
+
+Branch type should match the **dominant** commit type on that branch. Commits on the branch still follow Conventional Commits, e.g. `feat(timeline): add ghost nodes for copilot suggestions`.
