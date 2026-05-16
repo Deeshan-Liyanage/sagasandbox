@@ -4,6 +4,7 @@ import {
   forwardRef,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useImperativeHandle,
   useMemo,
   useRef,
@@ -190,6 +191,8 @@ export const GeographyCanvas = forwardRef<
   const altHeldRef = useRef(false);
   const shiftHeldRef = useRef(false);
   const panWindowCleanupRef = useRef<(() => void) | null>(null);
+  /** Skips scenery layout sync while Konva is mid drag/transform. */
+  const sceneryInteractingRef = useRef(false);
 
   const [size, setSize] = useState({ width: 800, height: 600 });
   const [tool, setTool] = useState<CanvasTool>("map");
@@ -264,10 +267,21 @@ export const GeographyCanvas = forwardRef<
     [persistCanvas],
   );
 
-  const syncSceneryNodeFromTransform = useCallback(
-    (transform: SceneryTransform) => {
-      const node = sceneryImageRef.current;
-      if (!node) return;
+  const bakeSceneryNodeTransform = useCallback((node: Konva.Image): SceneryTransform => {
+    const scaleX = node.scaleX();
+    const scaleY = node.scaleY();
+    return normalizeSceneryTransform({
+      x: node.x(),
+      y: node.y(),
+      width: node.width() * scaleX,
+      height: node.height() * scaleY,
+      scaleX: 1,
+      scaleY: 1,
+    });
+  }, []);
+
+  const applySceneryNodeTransform = useCallback(
+    (node: Konva.Image, transform: SceneryTransform) => {
       node.x(transform.x);
       node.y(transform.y);
       node.width(transform.width);
@@ -277,6 +291,15 @@ export const GeographyCanvas = forwardRef<
       node.getLayer()?.batchDraw();
     },
     [],
+  );
+
+  const syncSceneryNodeFromTransform = useCallback(
+    (transform: SceneryTransform) => {
+      const node = sceneryImageRef.current;
+      if (!node || sceneryInteractingRef.current) return;
+      applySceneryNodeTransform(node, transform);
+    },
+    [applySceneryNodeTransform],
   );
 
   const persistPinPosition = useCallback(
@@ -413,6 +436,16 @@ export const GeographyCanvas = forwardRef<
       syncSceneryNodeFromTransform(sceneryTransform);
     }
   }, [sceneryTransform, syncSceneryNodeFromTransform]);
+
+  /** Imperative viewport — avoids react-konva resetting position on unrelated re-renders during pan. */
+  useLayoutEffect(() => {
+    if (panSessionRef.current || isPanning) return;
+    const stage = stageRef.current;
+    if (!stage) return;
+    stage.position({ x: stagePos.x, y: stagePos.y });
+    stage.scale({ x: scale, y: scale });
+    stage.batchDraw();
+  }, [stagePos, scale, isPanning]);
 
   useEffect(() => {
     return () => {
@@ -951,41 +984,62 @@ export const GeographyCanvas = forwardRef<
     ],
   );
 
-  const handleSceneryDragEnd = useCallback(
-    (e: Konva.KonvaEventObject<DragEvent>) => {
-      const node = e.target as Konva.Image;
-      if (!sceneryTransform) return;
-      applySceneryTransform({
-        ...sceneryTransform,
-        x: node.x(),
-        y: node.y(),
-      });
+  const setSceneryTransformLive = useCallback(
+    (next: SceneryTransform) => {
+      setSceneryTransform(next);
+      canvasMetaRef.current = {
+        ...canvasMetaRef.current,
+        scenery_transform: next,
+      };
     },
-    [sceneryTransform, applySceneryTransform],
+    [],
   );
 
+  const handleSceneryDragStart = useCallback(() => {
+    sceneryInteractingRef.current = true;
+  }, []);
+
+  const handleSceneryDragMove = useCallback(
+    (e: Konva.KonvaEventObject<DragEvent>) => {
+      const node = e.target as Konva.Image;
+      setSceneryTransform((prev) => {
+        if (!prev) return prev;
+        const next = { ...prev, x: node.x(), y: node.y() };
+        canvasMetaRef.current = {
+          ...canvasMetaRef.current,
+          scenery_transform: next,
+        };
+        return next;
+      });
+    },
+    [],
+  );
+
+  const handleSceneryDragEnd = useCallback(
+    (e: Konva.KonvaEventObject<DragEvent>) => {
+      sceneryInteractingRef.current = false;
+      const node = e.target as Konva.Image;
+      applySceneryTransform(bakeSceneryNodeTransform(node));
+    },
+    [bakeSceneryNodeTransform, applySceneryTransform],
+  );
+
+  const handleSceneryTransform = useCallback(() => {
+    const node = sceneryImageRef.current;
+    if (!node) return;
+    sceneryInteractingRef.current = true;
+    const next = bakeSceneryNodeTransform(node);
+    applySceneryNodeTransform(node, next);
+    setSceneryTransformLive(next);
+  }, [bakeSceneryNodeTransform, applySceneryNodeTransform, setSceneryTransformLive]);
+
   const handleSceneryTransformEnd = useCallback(() => {
+    sceneryInteractingRef.current = false;
     const node = sceneryImageRef.current;
     if (!node) return;
 
-    const scaleX = node.scaleX();
-    const scaleY = node.scaleY();
-    const next = normalizeSceneryTransform({
-      x: node.x(),
-      y: node.y(),
-      width: node.width() * scaleX,
-      height: node.height() * scaleY,
-      scaleX: 1,
-      scaleY: 1,
-    });
-
-    node.scaleX(1);
-    node.scaleY(1);
-    node.width(next.width);
-    node.height(next.height);
-    node.x(next.x);
-    node.y(next.y);
-
+    const next = bakeSceneryNodeTransform(node);
+    applySceneryNodeTransform(node, next);
     applySceneryTransform(next);
 
     requestAnimationFrame(() => {
@@ -995,7 +1049,11 @@ export const GeographyCanvas = forwardRef<
         tr.getLayer()?.batchDraw();
       }
     });
-  }, [applySceneryTransform]);
+  }, [
+    bakeSceneryNodeTransform,
+    applySceneryNodeTransform,
+    applySceneryTransform,
+  ]);
 
   const handleStageDblClick = useCallback(() => {
     if (tool !== "map") return;
@@ -1245,10 +1303,6 @@ export const GeographyCanvas = forwardRef<
         ref={stageRef}
         width={size.width}
         height={size.height}
-        x={stagePos.x}
-        y={stagePos.y}
-        scaleX={scale}
-        scaleY={scale}
         draggable={false}
         onWheel={handleWheel}
         onMouseDown={handlePointerDown}
@@ -1276,7 +1330,10 @@ export const GeographyCanvas = forwardRef<
                 opacity={SCENERY_OPACITY}
                 draggable={tool === "scenery"}
                 listening={tool === "scenery"}
+                onDragStart={handleSceneryDragStart}
+                onDragMove={handleSceneryDragMove}
                 onDragEnd={handleSceneryDragEnd}
+                onTransform={handleSceneryTransform}
                 onTransformEnd={handleSceneryTransformEnd}
               />
               {tool === "scenery" ? (

@@ -42,16 +42,20 @@ function formatPinList(pins: SceneryPinGeo[]): string {
   if (pins.length === 0) {
     return "No named location pins on the canvas yet.";
   }
-  return pins
+  const entries = pins
     .map((pin, index) => {
       const parts = [
         `${index + 1}. "${pin.label.trim() || "Unnamed"}" at canvas coordinates (${Math.round(pin.canvas_x)}, ${Math.round(pin.canvas_y)})`,
       ];
       const desc = pin.description?.trim();
       if (desc) parts.push(`— ${desc}`);
+      parts.push(
+        "(must render as a clearly recognizable landmark or place matching this name/description at this relative position)",
+      );
       return parts.join(" ");
     })
     .join("\n");
+  return `${entries}\nEach pin above is mandatory cartography — the final map must make every one obvious at a glance.`;
 }
 
 function formatStrokeBounds(bounds: SceneryStrokeBounds | null): string {
@@ -130,18 +134,26 @@ export function buildScenerySynthesisPrompt(
       "- Primary deliverable: a flat 2D top-down cartographic map view (bird's-eye, orthographic), readable as a story geography board.",
       "- Depict terrain, districts, routes, water, structures, and zones implied by strokes and pins — not a 3D perspective scene unless USER OVERRIDES request otherwise.",
       "- The image fills the frame as a cohesive map plate suitable for overlaying interactive pins in the workspace.",
+      geospatial.pins.length > 0
+        ? "- **Pin landmarks (required):** Visibly and obviously depict every location pin as a clear, recognizable place on the map — tavern, gate, fortress, harbor, district, etc. — matching each pin's name and description at the correct relative position. A reader should spot each named location without guessing; do not leave pin sites as generic empty terrain unless USER OVERRIDES say otherwise."
+        : null,
+      "- **Fill the canvas:** Infer and render plausible terrain, landmarks, paths, vegetation, structures, and environmental detail in empty or sparse regions using theme, pin layout, stroke hints, and project context — avoid large voids, blank plates, or featureless expanses.",
+      "- **Default richness:** Produce vibrant, detailed, feature-rich cartography (vegetation, structures, terrain variation, atmospheric depth) unless USER OVERRIDES specify minimal, sparse, or plain output.",
       hasSketchReference
-        ? "- Align coastlines, borders, rivers, and regions with the attached sketch composition."
-        : "- Compose a plausible map layout that connects all named locations meaningfully.",
-    ].join("\n"),
+        ? "- Align coastlines, borders, rivers, and regions with the attached sketch composition; extend and enrich sparse areas rather than leaving them blank."
+        : "- Compose a plausible, feature-rich map layout that connects all named locations meaningfully.",
+    ]
+      .filter(Boolean)
+      .join("\n"),
   );
 
   sections.push(
     [
       "STYLE:",
       `- Render in ${aesthetic} technique with ${tone} atmosphere.`,
-      `- Lighting: cinematic but map-legible — avoid extreme darkness that hides geography.`,
-      `- Palette: harmonious with a ${themeLabel} world; restrained UI-neutral tones at edges.`,
+      "- Default cartographic density: vibrant, detailed, and feature-rich — varied vegetation, structures, terrain relief, paths, and atmospheric depth so the map feels lived-in and explorable.",
+      `- Lighting: cinematic but map-legible — avoid extreme darkness that hides geography or pin landmarks.`,
+      `- Palette: harmonious with a ${themeLabel} world; saturated enough to read features at a glance; restrained UI-neutral tones at edges.`,
       "- Line work: clear region boundaries; subtle contour or ink where appropriate for the aesthetic.",
       "- Mood: immersive, professional storyboard quality — the map is the hero asset, not interface chrome.",
     ].join("\n"),
@@ -152,7 +164,7 @@ export function buildScenerySynthesisPrompt(
       "USER OVERRIDES:",
       userNotes
         ? userNotes
-        : "None — follow default flat 2D top-down cartographic output.",
+        : "None — follow default flat 2D top-down cartographic output: vibrant feature-rich detail, fill sparse areas, and make every pin an obvious landmark.",
     ].join("\n"),
   );
 
@@ -160,13 +172,23 @@ export function buildScenerySynthesisPrompt(
     [
       "CONSTRAINTS:",
       "- No application UI, toolbars, buttons, cursors, or watermark text.",
-      "- Do not render pin labels as readable typography in the artwork unless USER OVERRIDES explicitly ask for labels.",
+      "- Do not render pin names as readable typography in the artwork unless USER OVERRIDES explicitly ask for labels — landmarks must still be visually obvious without text.",
+      geospatial.pins.length > 0
+        ? "- Every location pin must appear as a distinctive, recognizable landmark or built place on the map (not omitted, not a vague dot) unless USER OVERRIDES direct otherwise."
+        : null,
       "- No modern map UI elements (scale bars, compasses) unless requested.",
       "- Keep composition landscape-oriented and edge-to-edge.",
       hasSketchReference
-        ? "- Img2img: treat violet brush strokes and amber pin markers in the reference as layout guides only — replace them with finished terrain art."
-        : "- Text-only: invent coherent geography that respects pin coordinates as relative positions on the plate.",
-    ].join("\n"),
+        ? [
+            "- Img2img reference guides:",
+            "  - Violet brush strokes may represent EITHER cartographic map features (rivers, roads, walls, regions, coastlines) OR incidental writing, scribbles, and annotations — interpret them in context; when strokes form coherent regions or paths, prioritize geographic/cartographic reading over treating them as decoration.",
+            "  - Amber pin markers mark mandatory landmark positions — replace violet and amber guide overlays with finished terrain art, and place a clearly recognizable landmark or structure at each amber position matching that pin's name and description.",
+            "  - Do not leave large blank areas where the reference is sparse — infer plausible fill using theme, pins, and stroke context.",
+          ].join("\n")
+        : "- Text-only: invent coherent, feature-rich geography that respects pin coordinates as relative positions; each pin site must show an obvious matching landmark.",
+    ]
+      .filter(Boolean)
+      .join("\n"),
   );
 
   return sections.join("\n\n");
