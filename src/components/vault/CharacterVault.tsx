@@ -82,6 +82,10 @@ export function CharacterVault({
     id: string,
     body: Partial<Character> & { visual_traits?: Character["visual_traits"] },
   ) {
+    if (!apiAvailable) {
+      setError(PROJECT_API_UNAVAILABLE_MESSAGE);
+      throw new Error(PROJECT_API_UNAVAILABLE_MESSAGE);
+    }
     const res = await fetch(`/api/projects/${projectId}/characters/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -98,6 +102,10 @@ export function CharacterVault({
   }
 
   async function handleUpload(cId: string, file: File) {
+    if (!apiAvailable) {
+      setError(PROJECT_API_UNAVAILABLE_MESSAGE);
+      return;
+    }
     setUploading(true);
     try {
       const fd = new FormData();
@@ -231,6 +239,7 @@ export function CharacterVault({
         <CharacterEditPanel
           character={characters.find((c) => c.id === editingId)!}
           uploading={uploading}
+          apiAvailable={apiAvailable}
           onPatch={patchCharacter}
           onUpload={handleUpload}
         />
@@ -265,11 +274,13 @@ function Portrait({ character }: { character: Character }) {
 function CharacterEditPanel({
   character,
   uploading,
+  apiAvailable,
   onPatch,
   onUpload,
 }: {
   character: Character;
   uploading: boolean;
+  apiAvailable: boolean;
   onPatch: (
     id: string,
     body: Partial<Character> & { visual_traits?: Character["visual_traits"] },
@@ -280,13 +291,19 @@ function CharacterEditPanel({
 
   return (
     <div className="space-y-2 border-t border-[#2a2a2e] pt-3 text-sm">
-      <label className="flex cursor-pointer items-center gap-2 text-xs text-[#9ca3af]">
+      <label
+        className={cn(
+          "flex items-center gap-2 text-xs text-[#9ca3af]",
+          apiAvailable ? "cursor-pointer" : "cursor-not-allowed opacity-50",
+        )}
+      >
         <Upload className="h-3 w-3" />
         Reference image
         <input
           type="file"
           accept="image/*"
           className="hidden"
+          disabled={!apiAvailable}
           onChange={(e) => {
             const file = e.target.files?.[0];
             if (file) void onUpload(character.id, file);
@@ -298,9 +315,13 @@ function CharacterEditPanel({
         ElevenLabs voice ID
         <input
           value={voiceId}
+          disabled={!apiAvailable}
           onChange={(e) => setVoiceId(e.target.value)}
-          onBlur={() => void onPatch(character.id, { voice_id: voiceId })}
-          className="mt-1 w-full rounded border border-[#2a2a2e] bg-[#0e0e0f] px-2 py-1 text-white"
+          onBlur={() => {
+            if (!apiAvailable) return;
+            void onPatch(character.id, { voice_id: voiceId });
+          }}
+          className="mt-1 w-full rounded border border-[#2a2a2e] bg-[#0e0e0f] px-2 py-1 text-white disabled:opacity-50"
         />
       </label>
     </div>
