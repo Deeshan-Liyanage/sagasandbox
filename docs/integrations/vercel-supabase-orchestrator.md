@@ -43,6 +43,10 @@ Copy from `.env.example`. Map each variable to **where** it must exist.
 | `NEXT_PUBLIC_SITE_URL` | ✅ (preview URL) | ✅ (prod domain) | — | `http://localhost:3000` |
 | `FAL_KEY` | ✅ | ✅ | ✅ (image gen + Kokoro TTS) | ✅ |
 | `OPENAI_API_KEY` | ✅ | ✅ | — | ✅ |
+| `AUTH_DEV_BYPASS_ENABLED` | optional (`true` for QA) | ❌ (unless explicit) | — | optional (`true`) |
+| `AUTH_DEV_BYPASS_SECRET` | ✅ if bypass enabled | only if `ALLOW_PRODUCTION` | — | ✅ if bypass enabled |
+| `AUTH_DEV_BYPASS_ALLOW_PRODUCTION` | ❌ | ❌ default | — | ❌ |
+| `DEV_BYPASS_EMAIL` | optional | optional | — | optional |
 
 **Rules for the orchestrator:**
 
@@ -105,17 +109,20 @@ fal.ai calls `webhookUrl: ${NEXT_PUBLIC_SITE_URL}/api/webhooks/fal` from `src/li
 
 ## 6. Step-by-step: Supabase Dashboard
 
-### 6.1 Auth URL configuration (required for Agent A magic link)
+### 6.1 Auth URL configuration (magic link + Google OAuth)
 
-1. **Authentication** → **URL Configuration**
-2. **Site URL:** same as production `NEXT_PUBLIC_SITE_URL`
-3. **Redirect URLs** (add all that apply):
+1. **Authentication** → **Providers** → **Google** — enable; add Google Cloud OAuth client ID/secret (authorized redirect URI: `https://<project-ref>.supabase.co/auth/v1/callback`).
+2. **Authentication** → **URL Configuration**
+3. **Site URL:** same as production `NEXT_PUBLIC_SITE_URL`
+4. **Redirect URLs** (add all that apply):
    ```
    http://localhost:3000/auth/callback
    https://<production-domain>/auth/callback
    https://<staging-or-preview-domain>/auth/callback
    ```
-4. Save.
+5. Save.
+
+**Dev bypass (local only):** set `AUTH_DEV_BYPASS_ENABLED=true`, `AUTH_DEV_BYPASS_SECRET=<random>`, and `SUPABASE_SECRET_KEY` in `.env.local`. Login shows “Sign in as dev user” on `npm run dev` without email. Never enable on production unless `AUTH_DEV_BYPASS_ALLOW_PRODUCTION=true` and you protect `/api/auth/dev-bypass` with `?key=`.
 
 ### 6.2 Edge Function secrets
 
