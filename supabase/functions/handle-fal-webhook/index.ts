@@ -133,6 +133,44 @@ Deno.serve(async (req) => {
         .eq("id", character.id)
     }
 
+    const { data: sceneryProject } = await supabase
+      .from("projects")
+      .select("id, canvas_state")
+      .or(
+        `canvas_state->>scenery_fal_request_id.eq.${request_id},canvas_state->meta->>scenery_fal_request_id.eq.${request_id}`,
+      )
+      .maybeSingle()
+
+    if (sceneryProject?.canvas_state) {
+      const state = sceneryProject.canvas_state as Record<string, unknown>
+      const metaPatch = {
+        scenery_preview_url: storageUrl,
+        scenery_fal_request_id: null,
+      }
+
+      let nextState: Record<string, unknown>
+      if (state.stage && typeof state.stage === "object") {
+        const prevMeta =
+          typeof state.meta === "object" && state.meta !== null
+            ? (state.meta as Record<string, unknown>)
+            : {}
+        nextState = { ...state, meta: { ...prevMeta, ...metaPatch } }
+      } else if (state.className === "Stage") {
+        nextState = { ...state, ...metaPatch }
+      } else {
+        const prevMeta =
+          typeof state.meta === "object" && state.meta !== null
+            ? (state.meta as Record<string, unknown>)
+            : {}
+        nextState = { ...state, meta: { ...prevMeta, ...metaPatch } }
+      }
+
+      await supabase
+        .from("projects")
+        .update({ canvas_state: nextState })
+        .eq("id", sceneryProject.id)
+    }
+
     return Response.json({ ok: true })
   } catch (err) {
     console.error("webhook error:", err)

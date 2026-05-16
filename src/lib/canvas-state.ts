@@ -14,11 +14,96 @@ export interface ParsedCanvasState {
   viewport: ParsedCanvasViewport;
 }
 
+export interface CanvasMeta {
+  scenery_preview_url?: string | null;
+  depth_preview_url?: string | null;
+  scenery_fal_request_id?: string | null;
+  last_synthesis_at?: string | null;
+}
+
+const META_KEYS: (keyof CanvasMeta)[] = [
+  "scenery_preview_url",
+  "depth_preview_url",
+  "scenery_fal_request_id",
+  "last_synthesis_at",
+];
+
 type KonvaNode = {
   className?: string;
   attrs?: Record<string, unknown>;
   children?: KonvaNode[];
 };
+
+function isKonvaStage(value: unknown): value is KonvaNode {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as KonvaNode).className === "Stage"
+  );
+}
+
+function pickMeta(source: Record<string, unknown>): CanvasMeta {
+  const meta: CanvasMeta = {};
+  for (const key of META_KEYS) {
+    if (key in source) {
+      meta[key] = source[key] as CanvasMeta[typeof key];
+    }
+  }
+  return meta;
+}
+
+/** Read synthesis metadata from persisted canvas_state (wrapper or legacy top-level). */
+export function extractCanvasMeta(
+  raw: Record<string, unknown> | null | undefined,
+): CanvasMeta {
+  if (!raw || typeof raw !== "object") return {};
+  if (raw.meta && typeof raw.meta === "object") {
+    return pickMeta(raw.meta as Record<string, unknown>);
+  }
+  return pickMeta(raw);
+}
+
+/** Konva stage JSON from canvas_state (wrapper or legacy root Stage). */
+export function extractKonvaStage(
+  raw: Record<string, unknown> | null | undefined,
+): Record<string, unknown> | null {
+  if (!raw || typeof raw !== "object") return null;
+  if (isKonvaStage(raw.stage)) {
+    return raw.stage as Record<string, unknown>;
+  }
+  if (isKonvaStage(raw)) {
+    return raw;
+  }
+  return null;
+}
+
+export function buildCanvasState(
+  stage: Record<string, unknown>,
+  meta: CanvasMeta,
+): Record<string, unknown> {
+  return { stage, meta };
+}
+
+/** Preserve synthesis metadata when persisting Konva stage JSON from the client. */
+export function mergeCanvasStateForPersist(
+  existing: Record<string, unknown> | null | undefined,
+  newStage: Record<string, unknown>,
+): Record<string, unknown> {
+  return buildCanvasState(newStage, extractCanvasMeta(existing));
+}
+
+/** Apply metadata patches while keeping the Konva stage subtree intact. */
+export function patchCanvasMeta(
+  existing: Record<string, unknown> | null | undefined,
+  patch: Partial<CanvasMeta>,
+): Record<string, unknown> {
+  const stage = extractKonvaStage(existing);
+  const meta = { ...extractCanvasMeta(existing), ...patch };
+  if (stage) {
+    return buildCanvasState(stage, meta);
+  }
+  return { ...(existing ?? {}), ...meta };
+}
 
 function walkNodes(
   node: KonvaNode,
@@ -47,10 +132,10 @@ function walkNodes(
 export function parseKonvaCanvasState(
   raw: Record<string, unknown> | null | undefined,
 ): ParsedCanvasState | null {
-  if (!raw || typeof raw !== "object") return null;
-  if (Object.keys(raw).length === 0) return null;
+  const stage = extractKonvaStage(raw);
+  if (!stage || Object.keys(stage).length === 0) return null;
 
-  const root = raw as KonvaNode;
+  const root = stage as KonvaNode;
   const lines: ParsedCanvasLine[] = [];
   walkNodes(root, (line) => lines.push(line));
 

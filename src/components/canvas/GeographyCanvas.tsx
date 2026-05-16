@@ -19,8 +19,9 @@ import {
   broadcastCanvasOp,
   type CanvasOpPayload,
 } from "@/hooks/useRealtime";
-import { parseKonvaCanvasState } from "@/lib/canvas-state";
+import { extractCanvasMeta, parseKonvaCanvasState } from "@/lib/canvas-state";
 import { cn } from "@/lib/cn";
+import { toastError, toastSuccess } from "@/store/toast-store";
 import { PinCreator } from "./PinCreator";
 
 export type CanvasTool = "brush" | "pan";
@@ -101,6 +102,11 @@ export const GeographyCanvas = forwardRef<
     x: number;
     y: number;
   } | null>(null);
+  const [synthesizing, setSynthesizing] = useState(false);
+  const [sceneryPreviewUrl, setSceneryPreviewUrl] = useState<string | null>(
+    null,
+  );
+  const [depthPreviewUrl, setDepthPreviewUrl] = useState<string | null>(null);
 
   const hydrateFromState = useCallback(
     (state: Record<string, unknown> | null | undefined) => {
@@ -175,7 +181,47 @@ export const GeographyCanvas = forwardRef<
     if (hydratedStateKeyRef.current === stateKey) return;
     hydratedStateKeyRef.current = stateKey;
     hydrateFromState(initialCanvasState);
+    const meta = extractCanvasMeta(initialCanvasState);
+    setSceneryPreviewUrl(meta.scenery_preview_url ?? null);
+    setDepthPreviewUrl(meta.depth_preview_url ?? null);
   }, [initialCanvasState, hydrateFromState]);
+
+  useEffect(() => {
+    if (sceneryPreviewUrl !== "pending" || !apiAvailable) return;
+
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/projects/${projectId}`);
+        if (!res.ok) return;
+        const { project } = (await res.json()) as {
+          project: { canvas_state?: Record<string, unknown> };
+        };
+        const meta = extractCanvasMeta(project.canvas_state);
+        if (
+          meta.scenery_preview_url &&
+          meta.scenery_preview_url !== "pending"
+        ) {
+          if (!cancelled) {
+            setSceneryPreviewUrl(meta.scenery_preview_url);
+            if (meta.depth_preview_url) {
+              setDepthPreviewUrl(meta.depth_preview_url);
+            }
+            toastSuccess("Scenery synthesis complete");
+          }
+        }
+      } catch {
+        // ignore transient poll errors
+      }
+    };
+
+    void poll();
+    const interval = setInterval(() => void poll(), 4000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [sceneryPreviewUrl, apiAvailable, projectId]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -347,6 +393,73 @@ export const GeographyCanvas = forwardRef<
     [onPinsChange],
   );
 
+  const handleSynthesizeScenery = useCallback(async () => {
+    if (!apiAvailable || synthesizing) return;
+
+    const stage = stageRef.current;
+    const sketchDataUrl =
+      stage && lines.length > 0
+        ? stage.toDataURL({ pixelRatio: 1, mimeType: "image/png" })
+        : undefined;
+
+    setSynthesizing(true);
+    try {
+      const res = await fetch(
+        `/api/projects/${projectId}/canvas/synthesize`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sketch_description:
+              "Living canvas: enhance brush strokes into cinematic scenery",
+            sketch_data_url: sketchDataUrl,
+          }),
+        },
+      );
+
+      const data = (await res.json()) as {
+        queued?: boolean;
+        message?: string;
+        error?: string;
+        canvas_meta?: {
+          scenery_preview_url?: string | null;
+          depth_preview_url?: string | null;
+        };
+        depth_preview_url?: string | null;
+      };
+
+      if (!res.ok) {
+        throw new Error(data.error ?? "Scenery synthesis failed");
+      }
+
+      const meta = data.canvas_meta;
+      if (meta?.scenery_preview_url !== undefined) {
+        setSceneryPreviewUrl(meta.scenery_preview_url);
+      } else if (data.queued) {
+        setSceneryPreviewUrl("pending");
+      }
+
+      const depth =
+        meta?.depth_preview_url ?? data.depth_preview_url ?? null;
+      if (depth) setDepthPreviewUrl(depth);
+
+      if (data.queued) {
+        toastSuccess(data.message ?? "Scenery generation queued");
+      } else {
+        toastError(
+          data.message ??
+            "Scenery synthesis is unavailable. Configure FAL_KEY on the server.",
+        );
+      }
+    } catch (err) {
+      toastError(
+        err instanceof Error ? err.message : "Scenery synthesis failed",
+      );
+    } finally {
+      setSynthesizing(false);
+    }
+  }, [apiAvailable, synthesizing, projectId, lines.length]);
+
   const toolbar = useMemo(
     () => (
       <div className="absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 gap-2 rounded-lg border border-[#2a2a2e] bg-[#1a1a1e]/95 p-1 shadow-lg backdrop-blur">
@@ -368,24 +481,19 @@ export const GeographyCanvas = forwardRef<
         {apiAvailable ? (
           <button
             type="button"
-            onClick={() => {
-              void fetch(`/api/projects/${projectId}/canvas/synthesize`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  sketch_description:
-                    "Living canvas: enhance brush strokes into cinematic scenery",
-                }),
-              });
-            }}
-            className="rounded-md px-3 py-1.5 text-xs font-medium text-[#a78bfa] hover:bg-[#7c3aed]/20"
+            disabled={synthesizing}
+            onClick={() => void handleSynthesizeScenery()}
+            className={cn(
+              "rounded-md px-3 py-1.5 text-xs font-medium text-[#a78bfa] hover:bg-[#7c3aed]/20",
+              synthesizing && "cursor-wait opacity-60",
+            )}
           >
-            Synthesize scenery
+            {synthesizing ? "Synthesizing…" : "Synthesize scenery"}
           </button>
         ) : null}
       </div>
     ),
-    [tool, apiAvailable, projectId],
+    [tool, apiAvailable, synthesizing, handleSynthesizeScenery],
   );
 
   return (
@@ -393,6 +501,29 @@ export const GeographyCanvas = forwardRef<
       {loading ? (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#0e0e0f]/80">
           <div className="h-48 w-full max-w-md animate-pulse rounded-lg bg-[#1a1a1e]" />
+        </div>
+      ) : null}
+      {sceneryPreviewUrl && sceneryPreviewUrl !== "pending" ? (
+        // eslint-disable-next-line @next/next/no-img-element -- Fal preview URL from storage
+        <img
+          src={sceneryPreviewUrl}
+          alt="Synthesized scenery preview"
+          className="pointer-events-none absolute inset-0 z-[1] h-full w-full object-cover opacity-45"
+        />
+      ) : null}
+      {depthPreviewUrl && sceneryPreviewUrl !== "pending" && !sceneryPreviewUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={depthPreviewUrl}
+          alt="Depth map preview"
+          className="pointer-events-none absolute inset-0 z-[1] h-full w-full object-cover opacity-30 mix-blend-screen"
+        />
+      ) : null}
+      {sceneryPreviewUrl === "pending" ? (
+        <div className="pointer-events-none absolute inset-x-4 top-4 z-[2] rounded-md border border-[#7c3aed]/40 bg-[#7c3aed]/15 px-3 py-2 text-center text-xs text-[#e5e7eb]">
+          <span className="inline-block animate-pulse">
+            Generating scenery preview…
+          </span>
         </div>
       ) : null}
       {toolbar}
