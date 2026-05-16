@@ -10,7 +10,7 @@ import { createAdminClient } from "@/lib/supabase-admin";
 import { isSupabaseConfigured } from "@/lib/supabase-env";
 
 /**
- * Instantly signs in a fixed dev user via admin magic link (no email sent).
+ * Instantly signs in a fixed dev user via admin sign-in link (no email sent).
  * Enable with AUTH_DEV_BYPASS_ENABLED=true + AUTH_DEV_BYPASS_SECRET in .env.local.
  * Preview and production require the secret; local `npm run dev` does not.
  */

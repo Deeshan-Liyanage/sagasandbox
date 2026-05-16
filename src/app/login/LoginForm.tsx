@@ -9,41 +9,99 @@ type LoginFormProps = {
   devBypassUsesKey: boolean;
 };
 
+type AuthMode = "signin" | "signup" | "forgot";
+
+type LoadingState = "idle" | "email" | "google";
+
 export function LoginForm({
   nextPath,
   showDevBypass,
   devBypassUsesKey,
 }: LoginFormProps) {
+  const [mode, setMode] = useState<AuthMode>("signin");
   const [email, setEmail] = useState("");
-  const [sent, setSent] = useState(false);
+  const [password, setPassword] = useState("");
+  const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState<"idle" | "email" | "google">("idle");
+  const [loading, setLoading] = useState<LoadingState>("idle");
   const [devKey, setDevKey] = useState("");
 
-  const callbackUrl = `${typeof window !== "undefined" ? window.location.origin : ""}/auth/callback?next=${encodeURIComponent(nextPath)}`;
+  const origin =
+    typeof window !== "undefined" ? window.location.origin : "";
+  const callbackUrl = `${origin}/auth/callback?next=${encodeURIComponent(nextPath)}`;
 
-  async function handleEmailSubmit(e: React.FormEvent) {
+  function clearFeedback() {
+    setError(null);
+    setMessage(null);
+  }
+
+  function switchMode(next: AuthMode) {
+    setMode(next);
+    clearFeedback();
+    if (next !== "signin" && next !== "signup") {
+      setPassword("");
+    }
+  }
+
+  async function handlePasswordAuth(e: React.FormEvent) {
     e.preventDefault();
     setLoading("email");
-    setError(null);
+    clearFeedback();
 
     const supabase = createClient();
-    const { error: signInError } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: callbackUrl },
-    });
 
+    if (mode === "forgot") {
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(
+        email,
+        { redirectTo: callbackUrl },
+      );
+      setLoading("idle");
+      if (resetError) {
+        setError(resetError.message);
+        return;
+      }
+      setMessage("Check your email for a password reset link.");
+      return;
+    }
+
+    if (mode === "signup") {
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { emailRedirectTo: callbackUrl },
+      });
+      setLoading("idle");
+      if (signUpError) {
+        setError(signUpError.message);
+        return;
+      }
+      if (data.session) {
+        window.location.href = nextPath;
+        return;
+      }
+      setMessage(
+        "Account created. Sign in when ready, or check your email if confirmation is enabled.",
+      );
+      setMode("signin");
+      setPassword("");
+      return;
+    }
+
+    const { data, error: signInError } =
+      await supabase.auth.signInWithPassword({ email, password });
     setLoading("idle");
     if (signInError) {
       setError(signInError.message);
       return;
     }
-    setSent(true);
+    if (data.session) {
+      window.location.href = nextPath;
+    }
   }
 
   async function handleGoogleSignIn() {
     setLoading("google");
-    setError(null);
+    clearFeedback();
 
     const supabase = createClient();
     const { error: oauthError } = await supabase.auth.signInWithOAuth({
@@ -68,13 +126,18 @@ export function LoginForm({
     window.location.href = `/api/auth/dev-bypass?${params.toString()}`;
   }
 
-  if (sent) {
-    return (
-      <p className="text-center text-sm text-[#e5e7eb]">
-        Check your email for the magic link.
-      </p>
-    );
-  }
+  const submitLabel =
+    mode === "forgot"
+      ? loading === "email"
+        ? "Sending…"
+        : "Send reset link"
+      : mode === "signup"
+        ? loading === "email"
+          ? "Creating account…"
+          : "Create account"
+        : loading === "email"
+          ? "Signing in…"
+          : "Sign in";
 
   return (
     <div className="space-y-5">
@@ -94,7 +157,30 @@ export function LoginForm({
         <span className="h-px flex-1 bg-[#2a2a2e]" />
       </div>
 
-      <form onSubmit={handleEmailSubmit} className="space-y-4">
+      {mode !== "forgot" ? (
+        <div
+          className="flex rounded-lg border border-[#2a2a2e] bg-[#0e0e0f] p-0.5"
+          role="tablist"
+          aria-label="Email authentication mode"
+        >
+          <ModeTab
+            active={mode === "signin"}
+            onClick={() => switchMode("signin")}
+          >
+            Sign in
+          </ModeTab>
+          <ModeTab
+            active={mode === "signup"}
+            onClick={() => switchMode("signup")}
+          >
+            Sign up
+          </ModeTab>
+        </div>
+      ) : (
+        <p className="text-center text-sm text-[#9ca3af]">Reset your password</p>
+      )}
+
+      <form onSubmit={handlePasswordAuth} className="space-y-4">
         <label className="block">
           <span className="mb-1 block text-xs uppercase tracking-wide text-[#9ca3af]">
             Email
@@ -102,20 +188,66 @@ export function LoginForm({
           <input
             type="email"
             required
+            autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             className="w-full rounded-lg border border-[#2a2a2e] bg-[#0e0e0f] px-3 py-2 text-sm text-white outline-none focus:border-[#7c3aed]"
             placeholder="you@studio.com"
           />
         </label>
+
+        {mode !== "forgot" ? (
+          <label className="block">
+            <span className="mb-1 block text-xs uppercase tracking-wide text-[#9ca3af]">
+              Password
+            </span>
+            <input
+              type="password"
+              required
+              minLength={6}
+              autoComplete={
+                mode === "signup" ? "new-password" : "current-password"
+              }
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full rounded-lg border border-[#2a2a2e] bg-[#0e0e0f] px-3 py-2 text-sm text-white outline-none focus:border-[#7c3aed]"
+              placeholder={mode === "signup" ? "At least 6 characters" : "••••••••"}
+            />
+          </label>
+        ) : null}
+
+        {message ? (
+          <p className="text-sm text-emerald-400">{message}</p>
+        ) : null}
         {error ? <p className="text-sm text-red-400">{error}</p> : null}
+
         <button
           type="submit"
           disabled={loading !== "idle"}
           className="w-full rounded-lg bg-[#7c3aed] px-4 py-2 text-sm font-medium text-white hover:bg-[#6d28d9] disabled:opacity-50"
         >
-          {loading === "email" ? "Sending…" : "Send magic link"}
+          {submitLabel}
         </button>
+
+        {mode === "signin" ? (
+          <button
+            type="button"
+            onClick={() => switchMode("forgot")}
+            className="w-full text-center text-xs text-[#9ca3af] hover:text-[#e5e7eb]"
+          >
+            Forgot password?
+          </button>
+        ) : null}
+
+        {mode === "forgot" ? (
+          <button
+            type="button"
+            onClick={() => switchMode("signin")}
+            className="w-full text-center text-xs text-[#9ca3af] hover:text-[#e5e7eb]"
+          >
+            Back to sign in
+          </button>
+        ) : null}
       </form>
 
       {showDevBypass ? (
@@ -149,6 +281,32 @@ export function LoginForm({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function ModeTab({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition ${
+        active
+          ? "bg-[#7c3aed] text-white"
+          : "text-[#9ca3af] hover:text-[#e5e7eb]"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 
