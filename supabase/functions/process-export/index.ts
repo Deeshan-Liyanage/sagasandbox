@@ -83,8 +83,24 @@ async function processStoryboardPdf(
     .eq("id", exportId)
 }
 
-/** Voices from fal-ai/kokoro that suit cinematic narration. */
+/** Voices from fal-ai/kokoro — keep in sync with CharacterVault KOKORO_VOICES. */
+const KOKORO_VOICES = [
+  "af_heart",
+  "af_bella",
+  "af_nova",
+  "af_sarah",
+  "af_river",
+  "am_echo",
+  "am_eric",
+  "am_michael",
+  "am_adam",
+] as const
+
 const NARRATOR_VOICES = ["am_echo", "am_eric", "am_michael", "af_sarah", "af_nova"]
+
+function isKokoroVoice(voice: string): boolean {
+  return (KOKORO_VOICES as readonly string[]).includes(voice)
+}
 
 async function kokoro(text: string, voiceIndex: number, voiceOverride?: string): Promise<string | null> {
   if (!FAL_KEY) {
@@ -143,9 +159,8 @@ async function processAudioScript(exportId: string, projectId: string, events: T
     // Resolve Kokoro voice: first character mentioned in text wins, else rotate.
     const matchedVoice = [...voiceMap.entries()]
       .find(([name]) => text.toLowerCase().includes(name))?.[1]
-    const voiceOverride = matchedVoice && NARRATOR_VOICES.includes(matchedVoice)
-      ? matchedVoice
-      : undefined
+    const voiceOverride =
+      matchedVoice && isKokoroVoice(matchedVoice) ? matchedVoice : undefined
 
     // 500 ms gap between calls to stay within rate limits
     if (i > 0) await new Promise((r) => setTimeout(r, 500))

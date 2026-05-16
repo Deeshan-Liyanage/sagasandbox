@@ -331,11 +331,10 @@ function CharacterEditPanel({
           value={voiceId}
           disabled={!apiAvailable}
           onChange={(e) => {
-            setVoiceId(e.target.value);
-          }}
-          onBlur={() => {
+            const next = e.target.value;
+            setVoiceId(next);
             if (!apiAvailable) return;
-            void onPatch(character.id, { voice_id: voiceId || null });
+            void onPatch(character.id, { voice_id: next || null });
           }}
           className="mt-1 w-full rounded border border-[#2a2a2e] bg-[#0e0e0f] px-2 py-1 text-white disabled:opacity-50"
         >
