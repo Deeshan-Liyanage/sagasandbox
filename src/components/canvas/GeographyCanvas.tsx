@@ -19,6 +19,7 @@ import {
   broadcastCanvasOp,
   type CanvasOpPayload,
 } from "@/hooks/useRealtime";
+import { parseKonvaCanvasState } from "@/lib/canvas-state";
 import { cn } from "@/lib/cn";
 import { PinCreator } from "./PinCreator";
 
@@ -30,6 +31,8 @@ export interface GeographyCanvasProps {
   onPinsChange: Dispatch<SetStateAction<LocationPin[]>>;
   onPinSelect: (pin: LocationPin) => void;
   onCanvasChange: (konvaJson: object) => void;
+  initialCanvasState?: Record<string, unknown> | null;
+  onHydrated?: () => void;
   loading?: boolean;
   userId?: string;
   apiAvailable?: boolean;
@@ -37,6 +40,7 @@ export interface GeographyCanvasProps {
 
 export interface GeographyCanvasHandle {
   applyCanvasOp: (op: CanvasOpPayload) => void;
+  hydrateFromState: (state: Record<string, unknown> | null | undefined) => void;
 }
 
 interface BrushLine {
@@ -46,6 +50,14 @@ interface BrushLine {
 
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 5;
+const CURSOR_STALE_MS = 4000;
+const CURSOR_BROADCAST_MS = 80;
+
+interface PeerCursor {
+  x: number;
+  y: number;
+  updatedAt: number;
+}
 
 function pinColor(status: LocationPin["gen_status"]) {
   return GEN_STATUS_COLORS[status] ?? "#F59E0B";
@@ -61,6 +73,8 @@ export const GeographyCanvas = forwardRef<
     onPinsChange,
     onPinSelect,
     onCanvasChange,
+    initialCanvasState = null,
+    onHydrated,
     loading = false,
     userId = "local",
     apiAvailable = true,
@@ -69,17 +83,37 @@ export const GeographyCanvas = forwardRef<
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
+  const cursorThrottleRef = useRef(0);
+  const hydratedRef = useRef(false);
   const [size, setSize] = useState({ width: 800, height: 600 });
   const [tool, setTool] = useState<CanvasTool>("brush");
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 });
   const [scale, setScale] = useState(1);
   const [lines, setLines] = useState<BrushLine[]>([]);
+  const [peerCursors, setPeerCursors] = useState<Record<string, PeerCursor>>(
+    {},
+  );
   const [drawing, setDrawing] = useState(false);
   const [currentLineId, setCurrentLineId] = useState<string | null>(null);
   const [pinCreator, setPinCreator] = useState<{
     x: number;
     y: number;
   } | null>(null);
+
+  const hydrateFromState = useCallback(
+    (state: Record<string, unknown> | null | undefined) => {
+      const parsed = parseKonvaCanvasState(state);
+      if (!parsed) {
+        onHydrated?.();
+        return;
+      }
+      setLines(parsed.lines);
+      setStagePos({ x: parsed.viewport.x, y: parsed.viewport.y });
+      setScale(parsed.viewport.scale);
+      onHydrated?.();
+    },
+    [onHydrated],
+  );
 
   const applyCanvasOp = useCallback(
     (op: CanvasOpPayload) => {
@@ -111,8 +145,16 @@ export const GeographyCanvas = forwardRef<
         case "delete":
           setLines((prev) => prev.filter((l) => l.id !== op.object_id));
           break;
-        case "cursor":
+        case "cursor": {
+          const x = op.payload.x;
+          const y = op.payload.y;
+          if (typeof x !== "number" || typeof y !== "number") return;
+          setPeerCursors((prev) => ({
+            ...prev,
+            [op.user_id]: { x, y, updatedAt: Date.now() },
+          }));
           break;
+        }
         default:
           break;
       }
@@ -120,7 +162,36 @@ export const GeographyCanvas = forwardRef<
     [userId],
   );
 
-  useImperativeHandle(ref, () => ({ applyCanvasOp }), [applyCanvasOp]);
+  useImperativeHandle(
+    ref,
+    () => ({ applyCanvasOp, hydrateFromState }),
+    [applyCanvasOp, hydrateFromState],
+  );
+
+  useEffect(() => {
+    if (hydratedRef.current) return;
+    hydratedRef.current = true;
+    hydrateFromState(initialCanvasState);
+  }, [initialCanvasState, hydrateFromState]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const cutoff = Date.now() - CURSOR_STALE_MS;
+      setPeerCursors((prev) => {
+        const next: Record<string, PeerCursor> = {};
+        let changed = false;
+        for (const [id, cursor] of Object.entries(prev)) {
+          if (cursor.updatedAt >= cutoff) {
+            next[id] = cursor;
+          } else {
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -192,19 +263,37 @@ export const GeographyCanvas = forwardRef<
     }
   }, [tool, getStagePoint]);
 
+  const broadcastCursor = useCallback(
+    (point: { x: number; y: number }) => {
+      const now = Date.now();
+      if (now - cursorThrottleRef.current < CURSOR_BROADCAST_MS) return;
+      cursorThrottleRef.current = now;
+      void broadcastCanvasOp(projectId, {
+        op: "cursor",
+        user_id: userId,
+        object_id: userId,
+        payload: { x: point.x, y: point.y },
+      });
+    },
+    [projectId, userId],
+  );
+
   const handlePointerMove = useCallback(() => {
-    if (!drawing || !currentLineId) return;
     const point = getStagePoint();
     if (!point) return;
 
-    setLines((prev) =>
-      prev.map((line) =>
-        line.id === currentLineId
-          ? { ...line, points: [...line.points, point.x, point.y] }
-          : line,
-      ),
-    );
-  }, [drawing, currentLineId, getStagePoint]);
+    if (drawing && currentLineId) {
+      setLines((prev) =>
+        prev.map((line) =>
+          line.id === currentLineId
+            ? { ...line, points: [...line.points, point.x, point.y] }
+            : line,
+        ),
+      );
+    }
+
+    broadcastCursor(point);
+  }, [drawing, currentLineId, getStagePoint, broadcastCursor]);
 
   const handlePointerUp = useCallback(() => {
     if (drawing && currentLineId) {
@@ -275,16 +364,13 @@ export const GeographyCanvas = forwardRef<
     [tool],
   );
 
-  if (loading) {
-    return (
-      <div className="flex h-full items-center justify-center bg-[#0e0e0f]">
-        <div className="h-48 w-full max-w-md animate-pulse rounded-lg bg-[#1a1a1e]" />
-      </div>
-    );
-  }
-
   return (
     <div ref={containerRef} className="relative h-full w-full bg-[#0e0e0f]">
+      {loading ? (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#0e0e0f]/80">
+          <div className="h-48 w-full max-w-md animate-pulse rounded-lg bg-[#1a1a1e]" />
+        </div>
+      ) : null}
       {toolbar}
       {pins.length === 0 && !pinCreator ? (
         <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-[#9ca3af]">
@@ -320,6 +406,7 @@ export const GeographyCanvas = forwardRef<
           {lines.map((line) => (
             <Line
               key={line.id}
+              id={line.id}
               points={line.points}
               stroke="#7c3aed"
               strokeWidth={3 / scale}
@@ -327,6 +414,18 @@ export const GeographyCanvas = forwardRef<
               lineCap="round"
               lineJoin="round"
             />
+          ))}
+          {Object.entries(peerCursors).map(([peerId, cursor]) => (
+            <Group key={`cursor-${peerId}`} x={cursor.x} y={cursor.y}>
+              <Circle radius={6} fill="#10b981" stroke="#0e0e0f" strokeWidth={2} />
+              <Text
+                text={`@${peerId.slice(0, 6)}`}
+                fontSize={10}
+                fill="#10b981"
+                y={10}
+                offsetX={18}
+              />
+            </Group>
           ))}
           {pins.map((pin) => (
             <Group

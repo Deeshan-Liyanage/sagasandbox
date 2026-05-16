@@ -2,17 +2,25 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { AppShell, type SidebarNav } from "@/components/layout/AppShell";
 import { CharacterVault } from "@/components/vault/CharacterVault";
 import { PinSidebar } from "@/components/canvas/PinSidebar";
 import { ExportTerminal } from "@/components/export/ExportTerminal";
 import { TimelineStrip } from "@/components/timeline/TimelineStrip";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
+import { ToastHost } from "@/components/shared/ToastHost";
+import {
+  PanelSkeleton,
+  TimelineSkeleton,
+} from "@/components/shared/PanelSkeleton";
 import type { GeographyCanvasHandle } from "@/components/canvas/GeographyCanvas";
 import { useProjectRealtime } from "@/hooks/useRealtime";
 import type { CanvasOpPayload } from "@/hooks/useRealtime";
 import { useUIStore } from "@/store/ui-store";
+import { toastError } from "@/store/toast-store";
 import { themeAccent } from "@/lib/constants";
+import { DEMO_PROJECT_ID } from "@/lib/mock-workspace";
 import {
   isProjectApiAvailable,
   PROJECT_API_UNAVAILABLE_MESSAGE,
@@ -22,6 +30,7 @@ import { createClient } from "@/lib/supabase-client";
 import { isSupabaseConfigured } from "@/lib/supabase-env";
 import type {
   Character,
+  Export,
   LocationPin,
   Project,
   TimelineEvent,
@@ -42,11 +51,13 @@ const GeographyCanvas = dynamic(
   },
 );
 
+
 export interface WorkspaceClientProps {
   project: Project;
   initialPins: LocationPin[];
   initialEvents: TimelineEvent[];
   initialCharacters: Character[];
+  initialCanvasState?: Record<string, unknown> | null;
   userId?: string;
   /** When false, mutation UIs stay disabled (e.g. mock demo workspace). */
   apiAvailable?: boolean;
@@ -59,6 +70,7 @@ export function WorkspaceClient({
   initialPins,
   initialEvents,
   initialCharacters,
+  initialCanvasState = null,
   userId: initialUserId,
   apiAvailable: apiAvailableProp,
 }: WorkspaceClientProps) {
@@ -67,14 +79,15 @@ export function WorkspaceClient({
   const [characters, setCharacters] = useState(initialCharacters);
   const [activeNav, setActiveNav] = useState<SidebarNav>("canvas");
   const [userId, setUserId] = useState(initialUserId ?? "local");
-  const [canvasPersistError, setCanvasPersistError] = useState<string | null>(
-    null,
-  );
+  const [canvasHydrating, setCanvasHydrating] = useState(true);
+  const [panelsBooting, setPanelsBooting] = useState(true);
+  const [liveExport, setLiveExport] = useState<Export | null>(null);
 
   const canvasRef = useRef<GeographyCanvasHandle>(null);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const apiAvailable =
     apiAvailableProp ?? isProjectApiAvailable(project.id);
+  const isDemo = project.id === DEMO_PROJECT_ID;
 
   const {
     selectedPin,
@@ -85,6 +98,11 @@ export function WorkspaceClient({
   } = useUIStore();
 
   const accent = themeAccent(project.theme);
+
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setPanelsBooting(false));
+    return () => cancelAnimationFrame(id);
+  }, []);
 
   useEffect(() => {
     if (initialUserId) return;
@@ -132,6 +150,10 @@ export function WorkspaceClient({
     canvasRef.current?.applyCanvasOp(op);
   }, []);
 
+  const handleExportUpdate = useCallback((exp: Export) => {
+    setLiveExport(exp);
+  }, []);
+
   const handleCanvasChange = useCallback(
     (konvaJson: object) => {
       if (!apiAvailable) return;
@@ -148,11 +170,10 @@ export function WorkspaceClient({
             if (!res.ok) {
               throw new Error(await readApiError(res, "Failed to save canvas"));
             }
-            setCanvasPersistError(null);
           } catch (err) {
-            setCanvasPersistError(
-              err instanceof Error ? err.message : "Failed to save canvas",
-            );
+            const message =
+              err instanceof Error ? err.message : "Failed to save canvas";
+            toastError(message);
           }
         })();
       }, CANVAS_PERSIST_MS);
@@ -165,15 +186,29 @@ export function WorkspaceClient({
       onCanvasOp: handleCanvasOp,
       onPinUpdate: handlePinUpdate,
       onEventUpdate: handleEventUpdate,
-      onExportUpdate: () => {},
+      onExportUpdate: handleExportUpdate,
       onCharacterUpdate: handleCharacterUpdate,
     }),
-    [handleCanvasOp, handlePinUpdate, handleEventUpdate, handleCharacterUpdate],
+    [
+      handleCanvasOp,
+      handlePinUpdate,
+      handleEventUpdate,
+      handleExportUpdate,
+      handleCharacterUpdate,
+    ],
   );
 
   useProjectRealtime(project.id, realtimeHandlers);
 
   const sidebarContent = useMemo(() => {
+    if (panelsBooting) {
+      if (sidebarMode === "vault" || activeNav === "vault") {
+        return <PanelSkeleton rows={4} />;
+      }
+      if (sidebarMode === "export" || activeNav === "export") {
+        return <PanelSkeleton rows={3} />;
+      }
+    }
     if (sidebarMode === "vault") {
       return (
         <CharacterVault
@@ -190,6 +225,8 @@ export function WorkspaceClient({
           projectId={project.id}
           events={events}
           apiAvailable={apiAvailable}
+          liveExport={liveExport}
+          realtimeActive={isSupabaseConfigured()}
         />
       );
     }
@@ -199,13 +236,23 @@ export function WorkspaceClient({
         canvas.
       </p>
     );
-  }, [sidebarMode, project.id, characters, events, apiAvailable]);
+  }, [
+    panelsBooting,
+    sidebarMode,
+    activeNav,
+    project.id,
+    characters,
+    events,
+    apiAvailable,
+    liveExport,
+  ]);
 
   return (
     <div
       className="h-screen"
       style={{ ["--accent" as string]: accent }}
     >
+      <ToastHost />
       <AppShell
         projectName={project.name}
         theme={project.theme}
@@ -219,25 +266,35 @@ export function WorkspaceClient({
         onExportClick={() => setSidebarMode("export")}
         sidebarContent={sidebarContent}
         timelineContent={
-          <TimelineStrip
-            projectId={project.id}
-            events={events}
-            pins={pins}
-            characters={characters}
-            apiAvailable={apiAvailable}
-            onEventsChange={setEvents}
-          />
+          panelsBooting ? (
+            <TimelineSkeleton />
+          ) : (
+            <TimelineStrip
+              projectId={project.id}
+              events={events}
+              pins={pins}
+              characters={characters}
+              apiAvailable={apiAvailable}
+              onEventsChange={setEvents}
+            />
+          )
         }
       >
         <ErrorBoundary>
-          {!apiAvailable ? (
+          {isDemo ? (
+            <p className="border-b border-[#7c3aed]/40 bg-[#7c3aed]/10 px-4 py-2 text-center text-xs text-[#e5e7eb]">
+              Demo workspace (read-only).{" "}
+              <Link
+                href="/projects"
+                className="font-medium text-[#a78bfa] underline-offset-2 hover:underline"
+              >
+                Open or create a project
+              </Link>{" "}
+              to save canvas, timeline, and vault changes.
+            </p>
+          ) : !apiAvailable ? (
             <p className="border-b border-[#2a2a2e] bg-[#1a1a1e] px-4 py-2 text-center text-xs text-[#9ca3af]">
               {PROJECT_API_UNAVAILABLE_MESSAGE}
-            </p>
-          ) : null}
-          {canvasPersistError ? (
-            <p className="border-b border-[#ef4444]/30 bg-[#1a1a1e] px-4 py-2 text-center text-xs text-[#ef4444]">
-              {canvasPersistError}
             </p>
           ) : null}
           <GeographyCanvas
@@ -246,6 +303,9 @@ export function WorkspaceClient({
             pins={pins}
             userId={userId}
             apiAvailable={apiAvailable}
+            initialCanvasState={initialCanvasState}
+            loading={canvasHydrating}
+            onHydrated={() => setCanvasHydrating(false)}
             onPinsChange={setPins}
             onPinSelect={(pin) => {
               setSelectedPin(pin);

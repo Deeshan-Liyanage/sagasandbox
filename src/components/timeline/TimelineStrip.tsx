@@ -25,6 +25,7 @@ import {
   PROJECT_API_UNAVAILABLE_MESSAGE,
   readApiError,
 } from "@/lib/project-api";
+import { toastError } from "@/store/toast-store";
 
 interface TimelineStripProps {
   projectId: string;
@@ -106,7 +107,9 @@ export function TimelineStrip({
       setForm({ title: "", description: "", pin_id: "" });
     } catch (err) {
       onEventsChange((prev) => prev.filter((ev) => ev.id !== optimistic.id));
-      setError(err instanceof Error ? err.message : "Create failed");
+      const message = err instanceof Error ? err.message : "Create failed";
+      setError(message);
+      toastError(message);
     }
   }
 

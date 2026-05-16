@@ -10,6 +10,7 @@ import {
   PROJECT_API_UNAVAILABLE_MESSAGE,
   readApiError,
 } from "@/lib/project-api";
+import { toastError } from "@/store/toast-store";
 
 interface CharacterVaultProps {
   projectId: string;
@@ -74,7 +75,9 @@ export function CharacterVault({
         voice_id: "",
       });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Create failed");
+      const message = e instanceof Error ? e.message : "Create failed";
+      setError(message);
+      toastError(message);
     }
   }
 
@@ -124,7 +127,9 @@ export function CharacterVault({
         ),
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Upload failed");
+      const message = e instanceof Error ? e.message : "Upload failed";
+      setError(message);
+      toastError(message);
     } finally {
       setUploading(false);
     }

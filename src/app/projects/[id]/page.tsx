@@ -25,6 +25,9 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
         initialPins={getMockPins(id)}
         initialEvents={getMockEvents(id)}
         initialCharacters={getMockCharacters(id)}
+        initialCanvasState={
+          getMockProject(id).canvas_state as Record<string, unknown>
+        }
         apiAvailable={false}
       />
     )
@@ -71,6 +74,7 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
       initialPins={pins ?? []}
       initialEvents={events ?? []}
       initialCharacters={characters ?? []}
+      initialCanvasState={project.canvas_state as Record<string, unknown>}
       userId={user?.id}
     />
   )
