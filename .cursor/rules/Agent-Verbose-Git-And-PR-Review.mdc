@@ -1,0 +1,101 @@
+---
+description: Verbose commits and PRs; reviewers give feedback; authors address review after merge or close
+alwaysApply: true
+---
+
+# Verbose git messages and PR review loop
+
+**Project policy:** Agents must write **detailed** commit and PR messages. Reviewing agents must **give substantive feedback**. The agent that opened a PR must **read review feedback and fix issues** after the PR is merged or closed (declined).
+
+Pair with [Agent-Milestone-Commits.mdc](Agent-Milestone-Commits.mdc), [No-Secrets-In-Repo.mdc](No-Secrets-In-Repo.mdc), and [Sync-With-Main.mdc](Sync-With-Main.mdc).
+
+## Verbose commit messages (required)
+
+Keep the **Conventional Commits subject** short (≤72 chars, imperative). The **body is required** for any non-trivial milestone — not a one-liner.
+
+Each commit body should explain, in complete sentences:
+
+1. **What** changed (files, behavior, user-visible effect)
+2. **Why** (problem, goal, tradeoff)
+3. **How to verify** (commands run, manual steps, expected outcome)
+4. **Risks / follow-ups** (migrations, env vars, known gaps) when relevant
+
+Example:
+
+```
+feat(timeline): add ghost nodes for copilot suggestions
+
+Copilot proposals render as semi-transparent timeline nodes until the user
+approves them. Adds TimelineStrip ghost styling and ui-store flag for
+pending node ids.
+
+Why: PRD requires agentic transparency before destructive timeline writes.
+
+Verify: npm run dev → project workspace → trigger copilot suggestion →
+ghost node appears at 50% opacity; Approve promotes to full opacity.
+
+Follow-up: wire approve action to Supabase pending_transactions (not in this commit).
+```
+
+Trivial-only changes (typo in comment, single-line doc fix) may use a subject only.
+
+## Verbose pull request descriptions (required)
+
+When creating a PR (`gh pr create` or equivalent), the body must be **substantive**, not a single sentence.
+
+Include these sections:
+
+### Summary
+- 3–6 bullets: outcomes, not file lists only
+
+### Context
+- Why this change exists; link issues or user goal
+
+### Changes
+- Group by area (`canvas`, `api`, `db`, etc.)
+- Note breaking changes or new env vars (names only — no secret values)
+
+### Test plan
+- Checkbox list of what you ran or what reviewers should run
+- Mark anything not tested and why
+
+### Reviewer notes (optional)
+- Areas you want extra eyes on; open questions
+
+## Reviewing agents must give feedback
+
+If you are asked to **review** a PR (or act as a review agent), you **must not** approve or close with silence.
+
+Provide **actionable feedback**, including when the change looks good:
+
+- Call out **bugs, security, missing tests, and regressions**
+- Reference **files and line ranges** when possible
+- Suggest **concrete fixes** or alternatives
+- Note **nits** separately from blockers
+- Use GitHub review comments or `gh pr review` with a written summary
+
+A review that only says “LGTM” without substance does **not** meet this rule unless the PR is truly trivial (e.g. typo) — still add one sentence on what you checked.
+
+## PR author: after merge or close
+
+The agent that **created** the PR owns follow-up on review feedback.
+
+When the PR is **merged** or **closed/declined**:
+
+1. **Read all** review comments, review summaries, and CI failure notes (`gh pr view`, `gh pr checks`, conversation thread).
+2. **Summarize** feedback for the user: what was raised, what was fixed in-branch vs still open.
+3. **Fix remaining issues**:
+   - **Merged:** open a follow-up branch/PR for post-merge comments, failing CI on `main`, or deferred nits marked as required
+   - **Declined/closed without merge:** address blockers on the same or a new branch; do not re-open until feedback is handled or the user directs otherwise
+4. **Do not ignore** “non-blocking” comments that describe real bugs or policy violations (e.g. [No-Secrets-In-Repo.mdc](No-Secrets-In-Repo.mdc)).
+
+If feedback is ambiguous, ask the user once; otherwise proceed with the most conservative fix.
+
+## Workflow checklist
+
+| Role | Action |
+|------|--------|
+| Author (commit) | Subject + detailed body per milestone |
+| Author (PR) | Full PR template sections |
+| Reviewer | Written feedback; blockers vs nits |
+| Author (post-PR) | Triage feedback → fix → new PR or commits as appropriate |
