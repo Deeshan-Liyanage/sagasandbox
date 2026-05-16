@@ -34,7 +34,6 @@ import {
   defaultSceneryTransform,
   extractCanvasMeta,
   MIN_SCENERY_SIZE,
-  MIN_SCENERY_SIZE,
   normalizeSceneryTransform,
   parseKonvaCanvasState,
   type CanvasMeta,
