@@ -12,7 +12,7 @@
 Wire the Next.js app on Vercel to the existing Supabase project so that:
 
 - Browser clients authenticate with Supabase Auth (cookies via `@supabase/ssr`).
-- API routes and webhooks use `SUPABASE_SERVICE_ROLE_KEY` only on the server.
+- API routes and webhooks use `SUPABASE_SECRET_KEY` (preferred) only on the server.
 - fal.ai webhooks reach `/api/webhooks/fal` on the **correct deployment URL** per environment.
 - Edge Functions (`handle-fal-webhook`, `process-export`, `cascade-regen`) have secrets independent of Vercel.
 
@@ -38,7 +38,8 @@ Copy from `.env.example`. Map each variable to **where** it must exist.
 |----------|----------------|-------------------|----------------------|-------------------|
 | `NEXT_PUBLIC_SUPABASE_URL` | ✅ | ✅ | — | ✅ |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | ✅ | ✅ | — | ✅ |
-| `SUPABASE_SERVICE_ROLE_KEY` | ✅ | ✅ | — | ✅ |
+| `SUPABASE_SECRET_KEY` | ✅ | ✅ | — | ✅ |
+| `SUPABASE_SERVICE_ROLE_KEY` (legacy fallback) | optional | optional | — | optional |
 | `NEXT_PUBLIC_SITE_URL` | ✅ (preview URL) | ✅ (prod domain) | — | `http://localhost:3000` |
 | `FAL_KEY` | ✅ | ✅ | ✅ `FAL_KEY` | ✅ |
 | `ELEVENLABS_API_KEY` | optional | optional | ✅ | optional |
@@ -48,7 +49,8 @@ Copy from `.env.example`. Map each variable to **where** it must exist.
 **Rules for the orchestrator:**
 
 1. **`NEXT_PUBLIC_*`** — Safe for browser; required at **build time** on Vercel. After changing, redeploy.
-2. **`SUPABASE_SERVICE_ROLE_KEY`** — Server-only. Used in API routes and `/api/webhooks/fal` forwarder. Never prefix with `NEXT_PUBLIC_`.
+2. **`SUPABASE_SECRET_KEY`** — Server-only. Used in API routes and `/api/webhooks/fal` forwarder. Never prefix with `NEXT_PUBLIC_`.
+   - Legacy fallback supported: `SUPABASE_SERVICE_ROLE_KEY`.
 3. **`NEXT_PUBLIC_SITE_URL`** — Must match the deployment users hit:
    - Production: `https://<your-production-domain>`
    - Preview: use Vercel’s **stable preview URL** for the project or set per-deployment via Vercel env UI (see §5).
@@ -59,7 +61,8 @@ Get keys from Supabase Dashboard → Project Settings → API:
 
 - **Project URL** → `NEXT_PUBLIC_SUPABASE_URL`
 - **anon / publishable key** → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- **service_role** → `SUPABASE_SERVICE_ROLE_KEY` (rotate if ever exposed)
+- **secret key (`sb_secret_...`)** → `SUPABASE_SECRET_KEY` (preferred)
+- **legacy service_role JWT** → `SUPABASE_SERVICE_ROLE_KEY` (fallback only)
 
 ---
 
@@ -122,7 +125,7 @@ fal.ai calls `webhookUrl: ${NEXT_PUBLIC_SITE_URL}/api/webhooks/fal` from `src/li
 2. Set:
    - `FAL_KEY` — same value as Vercel
    - `ELEVENLABS_API_KEY` — for `process-export` audio path
-3. `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are injected automatically by Supabase runtime.
+3. `SUPABASE_URL` plus key env (`SUPABASE_SECRET_KEYS` and legacy `SUPABASE_SERVICE_ROLE_KEY`) are injected by Supabase runtime.
 
 ### 6.3 Realtime (Agent C)
 
@@ -217,7 +220,7 @@ If the team uses [Vercel Supabase integration](https://vercel.com/integrations/s
 
 1. Vercel → Project → **Integrations** → Supabase → Connect your Supabase project (use the ref from Dashboard)
 2. Integration can auto-sync `NEXT_PUBLIC_SUPABASE_URL` and anon key to Vercel env.
-3. **Still manually add:** `SUPABASE_SERVICE_ROLE_KEY`, `FAL_KEY`, `NEXT_PUBLIC_SITE_URL`, `OPENAI_API_KEY`, Edge secrets.
+3. **Still manually add:** `SUPABASE_SECRET_KEY`, `FAL_KEY`, `NEXT_PUBLIC_SITE_URL`, `OPENAI_API_KEY`, Edge secrets.
 
 Do **not** rely on marketplace sync for service role or fal keys.
 
@@ -251,7 +254,7 @@ Do **not** rely on marketplace sync for service role or fal keys.
 ```
 fal.ai queue complete
   → POST {NEXT_PUBLIC_SITE_URL}/api/webhooks/fal  (Vercel Next.js)
-  → POST {SUPABASE_URL}/functions/v1/handle-fal-webhook  (service role bearer)
+  → POST {SUPABASE_URL}/functions/v1/handle-fal-webhook  (apikey: secret key)
   → upload images/generated/{request_id}.jpg
   → UPDATE location_pins | timeline_events | characters
   → Realtime postgres_changes → Agent C UI

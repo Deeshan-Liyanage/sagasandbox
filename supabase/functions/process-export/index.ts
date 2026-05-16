@@ -1,8 +1,26 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
+function resolveSupabaseAdminKey() {
+  const secretKeysRaw = Deno.env.get("SUPABASE_SECRET_KEYS")
+  if (secretKeysRaw) {
+    try {
+      const secretKeys = JSON.parse(secretKeysRaw) as Record<string, string>
+      if (secretKeys.default) return secretKeys.default
+    } catch {
+      // Fall through to single-key env vars.
+    }
+  }
+
+  return (
+    Deno.env.get("SUPABASE_SECRET_KEY") ??
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
+    Deno.env.get("SUPABASE_SB_KEY")
+  )
+}
+
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL")!,
-  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  resolveSupabaseAdminKey()!,
 )
 
 type TimelineEventRow = {

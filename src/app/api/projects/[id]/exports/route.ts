@@ -36,15 +36,24 @@ export async function POST(request: Request, context: RouteContext) {
     if (error || !exportRow) return jsonError(error?.message ?? "Insert failed");
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const serviceKey =
+      process.env.SUPABASE_SECRET_KEY ??
+      process.env.SUPABASE_SERVICE_ROLE_KEY ??
+      process.env.SUPABASE_SB_KEY;
 
     if (supabaseUrl && serviceKey) {
+      const isLegacyJwt = serviceKey.startsWith("eyJ");
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        apikey: serviceKey,
+      };
+      if (isLegacyJwt) {
+        headers.Authorization = `Bearer ${serviceKey}`;
+      }
+
       void fetch(`${supabaseUrl}/functions/v1/process-export`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${serviceKey}`,
-          "Content-Type": "application/json",
-        },
+        headers,
         body: JSON.stringify({ export_id: exportRow.id }),
       }).catch(() => {
         // Edge function may not be deployed yet (Agent B)
