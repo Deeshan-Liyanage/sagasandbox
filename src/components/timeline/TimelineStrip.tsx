@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import {
   DndContext,
   closestCenter,
@@ -17,8 +17,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Check, Loader2, Plus } from "lucide-react";
-import type { LocationPin, TimelineEvent } from "@/types/app";
-import type { Character } from "@/types/app";
+import type { LocationPin, TimelineEvent, Character } from "@/types/app";
 import { asGenStatus } from "@/types/app";
 import { GenStatusImage } from "@/components/shared/GenStatusImage";
 import { RemoteImage } from "@/components/shared/RemoteImage";
@@ -27,7 +26,7 @@ interface TimelineStripProps {
   events: TimelineEvent[];
   pins: LocationPin[];
   characters: Character[];
-  onEventsChange: React.Dispatch<React.SetStateAction<TimelineEvent[]>>;
+  onEventsChange: Dispatch<SetStateAction<TimelineEvent[]>>;
 }
 
 export function TimelineStrip({

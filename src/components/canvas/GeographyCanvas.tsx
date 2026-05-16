@@ -6,6 +6,8 @@ import {
   useMemo,
   useRef,
   useState,
+  type Dispatch,
+  type SetStateAction,
 } from "react";
 import { Stage, Layer, Line, Circle, Text, Group } from "react-konva";
 import type Konva from "konva";
@@ -20,7 +22,7 @@ export type CanvasTool = "brush" | "pan";
 export interface GeographyCanvasProps {
   projectId: string;
   pins: LocationPin[];
-  onPinsChange: (pins: LocationPin[]) => void;
+  onPinsChange: Dispatch<SetStateAction<LocationPin[]>>;
   onPinSelect: (pin: LocationPin) => void;
   onCanvasChange: (konvaJson: object) => void;
   loading?: boolean;
@@ -186,10 +188,10 @@ export function GeographyCanvas({
 
   const handlePinCreated = useCallback(
     (pin: LocationPin) => {
-      onPinsChange([...pins, pin]);
+      onPinsChange((prev) => [...prev, pin]);
       setPinCreator(null);
     },
-    [pins, onPinsChange],
+    [onPinsChange],
   );
 
   const toolbar = useMemo(

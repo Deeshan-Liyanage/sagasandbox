@@ -33,7 +33,7 @@ export function useProjectRealtime(
   const handlersRef = useRef(handlers);
   useEffect(() => {
     handlersRef.current = handlers;
-  });
+  }, [handlers]);
 
   useEffect(() => {
     if (!projectId || !isSupabaseConfigured()) return;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import { Loader2, Plus, Upload } from "lucide-react";
 import type { Character, CharacterRole } from "@/types/app";
 import { getVisualTraits } from "@/types/app";
@@ -10,7 +10,7 @@ import { cn } from "@/lib/cn";
 interface CharacterVaultProps {
   projectId: string;
   characters: Character[];
-  onCharactersChange: React.Dispatch<React.SetStateAction<Character[]>>;
+  onCharactersChange: Dispatch<SetStateAction<Character[]>>;
 }
 
 const emptyTraits = {
