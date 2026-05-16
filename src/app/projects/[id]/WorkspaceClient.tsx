@@ -164,6 +164,10 @@ export function WorkspaceClient({
     setLiveExport(exp);
   }, []);
 
+  const handleProjectUpdate = useCallback((updated: Project) => {
+    setProjectState(updated);
+  }, []);
+
   const handleCanvasChange = useCallback(
     (konvaJson: object) => {
       if (!apiAvailable) return;
@@ -216,6 +220,7 @@ export function WorkspaceClient({
         ),
       onCharacterDelete: (characterId: string) =>
         setCharacters((prev) => prev.filter((c) => c.id !== characterId)),
+      onProjectUpdate: handleProjectUpdate,
     }),
     [
       handleCanvasOp,
@@ -223,6 +228,7 @@ export function WorkspaceClient({
       handleEventUpdate,
       handleExportUpdate,
       handleCharacterUpdate,
+      handleProjectUpdate,
     ],
   );
 
@@ -370,7 +376,10 @@ export function WorkspaceClient({
             userId={userId}
             apiAvailable={apiAvailable}
             highlightedPinId={highlightedPinId}
-            initialCanvasState={initialCanvasState}
+            initialCanvasState={
+              (projectState.canvas_state as Record<string, unknown> | null) ??
+              initialCanvasState
+            }
             loading={canvasHydrating}
             onHydrated={() => setCanvasHydrating(false)}
             onPinsChange={setPins}

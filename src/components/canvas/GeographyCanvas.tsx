@@ -19,8 +19,13 @@ import {
   broadcastCanvasOp,
   type CanvasOpPayload,
 } from "@/hooks/useRealtime";
+import {
+  getSagaCanvasMeta,
+  sceneryDisplayUrl,
+} from "@/lib/canvas-meta";
 import { parseKonvaCanvasState } from "@/lib/canvas-state";
 import { cn } from "@/lib/cn";
+import { toastError, toastSuccess } from "@/store/toast-store";
 import { PinCreator } from "./PinCreator";
 
 export type CanvasTool = "brush" | "pan";
@@ -101,6 +106,10 @@ export const GeographyCanvas = forwardRef<
     x: number;
     y: number;
   } | null>(null);
+  const [synthesizing, setSynthesizing] = useState(false);
+  const [sceneryUrl, setSceneryUrl] = useState<string | null>(() =>
+    sceneryDisplayUrl(getSagaCanvasMeta(initialCanvasState)),
+  );
 
   const hydrateFromState = useCallback(
     (state: Record<string, unknown> | null | undefined) => {
@@ -176,6 +185,73 @@ export const GeographyCanvas = forwardRef<
     hydratedStateKeyRef.current = stateKey;
     hydrateFromState(initialCanvasState);
   }, [initialCanvasState, hydrateFromState]);
+
+  useEffect(() => {
+    setSceneryUrl(sceneryDisplayUrl(getSagaCanvasMeta(initialCanvasState)));
+  }, [initialCanvasState]);
+
+  const handleSynthesizeScenery = useCallback(async () => {
+    if (!apiAvailable || synthesizing) return;
+    setSynthesizing(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/canvas/synthesize`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sketch_description:
+            "Living canvas: enhance brush strokes into cinematic scenery backdrop",
+        }),
+      });
+      const data = (await res.json()) as {
+        error?: string;
+        request_id?: string | null;
+        scenery_preview_url?: string | null;
+      };
+      if (!res.ok) {
+        throw new Error(data.error ?? "Synthesis failed");
+      }
+
+      if (
+        data.scenery_preview_url &&
+        data.scenery_preview_url !== "pending"
+      ) {
+        setSceneryUrl(data.scenery_preview_url);
+        toastSuccess("Scenery backdrop ready");
+        return;
+      }
+
+      if (!data.request_id) {
+        throw new Error("No generation job was queued");
+      }
+
+      for (let attempt = 0; attempt < 40; attempt++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const pollRes = await fetch("/api/fal/poll", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ request_id: data.request_id }),
+        });
+        const pollData = (await pollRes.json()) as {
+          status?: string;
+          imageUrl?: string;
+          error?: string;
+        };
+        if (pollData.imageUrl) {
+          setSceneryUrl(pollData.imageUrl);
+          toastSuccess("Scenery backdrop ready");
+          return;
+        }
+        if (pollData.status && pollData.status !== "IN_QUEUE" && pollData.status !== "IN_PROGRESS") {
+          break;
+        }
+      }
+      toastError("Scenery is still generating — refresh in a moment");
+    } catch (err) {
+      toastError(err instanceof Error ? err.message : "Scenery synthesis failed");
+    } finally {
+      setSynthesizing(false);
+    }
+  }, [apiAvailable, projectId, synthesizing]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -368,28 +444,33 @@ export const GeographyCanvas = forwardRef<
         {apiAvailable ? (
           <button
             type="button"
-            onClick={() => {
-              void fetch(`/api/projects/${projectId}/canvas/synthesize`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  sketch_description:
-                    "Living canvas: enhance brush strokes into cinematic scenery",
-                }),
-              });
-            }}
-            className="rounded-md px-3 py-1.5 text-xs font-medium text-[#a78bfa] hover:bg-[#7c3aed]/20"
+            disabled={synthesizing}
+            onClick={() => void handleSynthesizeScenery()}
+            className={cn(
+              "rounded-md px-3 py-1.5 text-xs font-medium text-[#a78bfa] hover:bg-[#7c3aed]/20",
+              synthesizing && "cursor-wait opacity-60",
+            )}
           >
-            Synthesize scenery
+            {synthesizing ? "Synthesizing…" : "Synthesize scenery"}
           </button>
         ) : null}
       </div>
     ),
-    [tool, apiAvailable, projectId],
+    [tool, apiAvailable, synthesizing, handleSynthesizeScenery],
   );
 
   return (
     <div ref={containerRef} className="relative h-full w-full bg-[#0e0e0f]">
+      {sceneryUrl ? (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 z-0 bg-cover bg-center opacity-45"
+          style={{ backgroundImage: `url(${sceneryUrl})` }}
+        />
+      ) : null}
+      {synthesizing && !sceneryUrl ? (
+        <div className="pointer-events-none absolute inset-0 z-[5] animate-pulse bg-[#7c3aed]/10" />
+      ) : null}
       {loading ? (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#0e0e0f]/80">
           <div className="h-48 w-full max-w-md animate-pulse rounded-lg bg-[#1a1a1e]" />
@@ -404,6 +485,7 @@ export const GeographyCanvas = forwardRef<
 
       <Stage
         ref={stageRef}
+        className="relative z-[1] cursor-crosshair"
         width={size.width}
         height={size.height}
         x={stagePos.x}
@@ -426,7 +508,6 @@ export const GeographyCanvas = forwardRef<
             persistCanvas();
           }
         }}
-        className="cursor-crosshair"
       >
         <Layer>
           {lines.map((line) => (

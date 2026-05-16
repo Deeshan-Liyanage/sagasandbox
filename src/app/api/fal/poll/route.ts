@@ -12,6 +12,7 @@
 import { NextResponse } from "next/server"
 import { fal } from "@fal-ai/client"
 import { createAdminClient } from "@/lib/supabase-admin"
+import type { Json } from "@/types/db"
 
 const FAL_KEY = process.env.FAL_KEY?.trim()
 if (FAL_KEY) {
@@ -91,6 +92,25 @@ export async function POST(request: Request) {
         .from("characters")
         .update({ generated_portrait_url: imageUrl, gen_status: "done" })
         .eq("id", character.id)
+    }
+
+    const { data: sceneryProject } = await supabase
+      .from("projects")
+      .select("id, canvas_state")
+      .filter("canvas_state->_saga->>scenery_request_id", "eq", requestId)
+      .maybeSingle()
+
+    if (sceneryProject?.canvas_state && typeof sceneryProject.canvas_state === "object") {
+      const state = sceneryProject.canvas_state as Record<string, unknown>
+      const saga =
+        state._saga && typeof state._saga === "object" && !Array.isArray(state._saga)
+          ? { ...(state._saga as Record<string, unknown>) }
+          : {}
+      saga.scenery_preview_url = imageUrl
+      await supabase
+        .from("projects")
+        .update({ canvas_state: { ...state, _saga: saga } as Json })
+        .eq("id", sceneryProject.id)
     }
 
     return NextResponse.json({ ok: true, status: "COMPLETED", imageUrl })

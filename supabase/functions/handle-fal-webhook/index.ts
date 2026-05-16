@@ -70,6 +70,26 @@ Deno.serve(async (req) => {
           .update({ gen_status: "error" })
           .eq("id", character.id)
       }
+
+      const { data: sceneryProject } = await supabase
+        .from("projects")
+        .select("id, canvas_state")
+        .filter("canvas_state->_saga->>scenery_request_id", "eq", request_id)
+        .maybeSingle()
+
+      if (sceneryProject?.canvas_state && typeof sceneryProject.canvas_state === "object") {
+        const state = sceneryProject.canvas_state as Record<string, unknown>
+        const saga =
+          state._saga && typeof state._saga === "object" && !Array.isArray(state._saga)
+            ? { ...(state._saga as Record<string, unknown>) }
+            : {}
+        saga.scenery_preview_url = null
+        await supabase
+          .from("projects")
+          .update({ canvas_state: { ...state, _saga: saga } })
+          .eq("id", sceneryProject.id)
+      }
+
       return Response.json({ ok: true })
     }
 
@@ -116,6 +136,26 @@ Deno.serve(async (req) => {
           gen_status: "done",
         })
         .eq("id", character.id)
+    }
+
+    // Canvas scenery synthesis (stored in projects.canvas_state._saga)
+    const { data: sceneryProject } = await supabase
+      .from("projects")
+      .select("id, canvas_state")
+      .filter("canvas_state->_saga->>scenery_request_id", "eq", request_id)
+      .maybeSingle()
+
+    if (sceneryProject?.canvas_state && typeof sceneryProject.canvas_state === "object") {
+      const state = sceneryProject.canvas_state as Record<string, unknown>
+      const saga =
+        state._saga && typeof state._saga === "object" && !Array.isArray(state._saga)
+          ? { ...(state._saga as Record<string, unknown>) }
+          : {}
+      saga.scenery_preview_url = imageUrl
+      await supabase
+        .from("projects")
+        .update({ canvas_state: { ...state, _saga: saga } })
+        .eq("id", sceneryProject.id)
     }
 
     return Response.json({ ok: true })
