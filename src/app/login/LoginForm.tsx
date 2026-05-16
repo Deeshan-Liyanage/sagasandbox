@@ -70,8 +70,8 @@ export function LoginForm({
         password,
         options: { emailRedirectTo: callbackUrl },
       });
-      setLoading("idle");
       if (signUpError) {
+        setLoading("idle");
         setError(signUpError.message);
         return;
       }
@@ -79,9 +79,24 @@ export function LoginForm({
         window.location.href = nextPath;
         return;
       }
-      setMessage(
-        "Account created. Sign in when ready, or check your email if confirmation is enabled.",
-      );
+      const { data: signInData, error: signInError } =
+        await supabase.auth.signInWithPassword({ email, password });
+      setLoading("idle");
+      if (signInData.session) {
+        window.location.href = nextPath;
+        return;
+      }
+      const needsConfirmation =
+        signInError?.message.toLowerCase().includes("confirm") ?? false;
+      if (needsConfirmation) {
+        setError(
+          "Check your email for the confirmation link, then sign in.",
+        );
+      } else if (signInError) {
+        setError(signInError.message);
+      } else {
+        setMessage("Account created. Sign in with your email and password.");
+      }
       setMode("signin");
       setPassword("");
       return;

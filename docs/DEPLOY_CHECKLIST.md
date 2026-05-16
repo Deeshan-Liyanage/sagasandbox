@@ -7,6 +7,8 @@ Run through this list before claiming full PRD coverage on a live demo.
 ## Supabase
 
 - [x] Apply migrations in `supabase/migrations/` (remote: `feature_completeness`, `audio_bucket_and_char_upload_policy`, `audio_wav_mime_and_char_rls`, `security_hardening_v2`)
+- [ ] **Disable "Confirm email"** — Authentication → Providers → Email → Confirm email **OFF** *(required for hackathon; applies to production, preview, and local dev against this project)*
+- [ ] Enable Email provider with password sign-in *(Dashboard — manual)*
 - [ ] Enable Google OAuth provider; Client IDs field = `*.apps.googleusercontent.com` only *(Dashboard — manual)*
 - [ ] Redirect URLs include `https://sagasandbox.vercel.app/auth/callback` and local dev URL *(Dashboard — manual)*
 - [ ] Edge secrets: `FAL_KEY`, `SUPABASE_SECRET_KEY` *(Dashboard → Edge Functions → Secrets — verify)*
@@ -21,6 +23,7 @@ Run through this list before claiming full PRD coverage on a live demo.
 
 ## Vercel
 
+- [ ] GitHub Actions `VERCEL_TOKEN` — Settings → Secrets → Actions: create token at [vercel.com/account/tokens](https://vercel.com/account/tokens) with project access; update `VERCEL_TOKEN` if **Vercel Deploy** workflow fails with "token … is not valid" *(native Vercel Git deploys can still succeed)*
 - [x] `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (Production)
 - [x] `SUPABASE_SECRET_KEY` (Production)
 - [x] `FAL_KEY` (Production)
@@ -32,7 +35,7 @@ Run through this list before claiming full PRD coverage on a live demo.
 
 ## Smoke test (signed-in, real project UUID)
 
-1. Google sign-in or dev bypass (`/login?key=…`)
+1. Email/password sign-up (instant session when Confirm email is OFF), Google sign-in, or dev bypass (`/login?key=…`)
 2. Create project with theme + aesthetic
 3. Add pin → wait for `gen_status: done` (Fal webhook)
 4. Add timeline event linked to pin
