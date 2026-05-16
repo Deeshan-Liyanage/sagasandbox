@@ -18,10 +18,14 @@ function resolveSupabaseAdminKey() {
   )
 }
 
-const supabase = createClient(
-  Deno.env.get("SUPABASE_URL")!,
-  resolveSupabaseAdminKey()!,
-)
+const adminKey = resolveSupabaseAdminKey()
+if (!adminKey) {
+  throw new Error(
+    "Missing Supabase admin key (SUPABASE_SECRET_KEYS, SUPABASE_SECRET_KEY, or SUPABASE_SERVICE_ROLE_KEY)",
+  )
+}
+
+const supabase = createClient(Deno.env.get("SUPABASE_URL")!, adminKey)
 
 type TimelineEventRow = {
   id: string

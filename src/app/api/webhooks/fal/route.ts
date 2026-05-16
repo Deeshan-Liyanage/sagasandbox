@@ -1,32 +1,25 @@
 import { NextResponse } from "next/server"
+import {
+  getEdgeFunctionInvokeHeaders,
+  getSupabaseAdminKey,
+} from "@/lib/supabase-admin"
 
 export async function POST(request: Request) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const serviceRoleKey =
-    process.env.SUPABASE_SECRET_KEY ??
-    process.env.SUPABASE_SERVICE_ROLE_KEY ??
-    process.env.SUPABASE_SB_KEY
+  const adminKey = getSupabaseAdminKey()
 
-  if (!supabaseUrl || !serviceRoleKey) {
+  if (!supabaseUrl || !adminKey) {
     return NextResponse.json(
-      { error: "Supabase is not configured" },
+      { error: "Supabase is not configured (SUPABASE_SECRET_KEY or legacy service role)" },
       { status: 500 },
     )
   }
 
   const body = await request.json()
-  const isLegacyJwt = serviceRoleKey.startsWith("eyJ")
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    apikey: serviceRoleKey,
-  }
-  if (isLegacyJwt) {
-    headers.Authorization = `Bearer ${serviceRoleKey}`
-  }
 
   const res = await fetch(`${supabaseUrl}/functions/v1/handle-fal-webhook`, {
     method: "POST",
-    headers,
+    headers: getEdgeFunctionInvokeHeaders(adminKey),
     body: JSON.stringify(body),
   })
 
