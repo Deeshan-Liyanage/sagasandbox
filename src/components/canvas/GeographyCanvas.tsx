@@ -27,6 +27,7 @@ import {
   SCENERY_SYNTHESIS_TIMEOUT_MS,
 } from "@/lib/scenery-synthesis";
 import { cn } from "@/lib/cn";
+import { exportMapSketchToDataUrl } from "@/lib/canvas-sketch-export";
 import { toastError, toastSuccess } from "@/store/toast-store";
 import { PinCreator } from "./PinCreator";
 
@@ -450,11 +451,23 @@ export const GeographyCanvas = forwardRef<
   const handleSynthesizeScenery = useCallback(async () => {
     if (!apiAvailable || synthesizing) return;
 
-    const stage = stageRef.current;
-    const sketchDataUrl =
-      stage && lines.length > 0
-        ? stage.toDataURL({ pixelRatio: 1, mimeType: "image/png" })
-        : undefined;
+    const hasStrokes = lines.length > 0;
+    const sketchDataUrl = hasStrokes
+      ? exportMapSketchToDataUrl(
+          lines,
+          pins.map((p) => ({
+            canvas_x: p.canvas_x,
+            canvas_y: p.canvas_y,
+            label: p.label,
+          })),
+        )
+      : null;
+
+    if (!hasStrokes) {
+      toastError(
+        "No strokes on the map — synthesis will use theme and pin names only.",
+      );
+    }
 
     setSynthesizing(true);
     try {
@@ -465,8 +478,9 @@ export const GeographyCanvas = forwardRef<
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             sketch_description:
-              "Living canvas: enhance brush strokes into cinematic scenery",
-            sketch_data_url: sketchDataUrl,
+              "Cinematic geography map backdrop faithful to the sketched terrain layout",
+            sketch_data_url: sketchDataUrl ?? undefined,
+            has_strokes: hasStrokes,
           }),
         },
       );
@@ -475,6 +489,8 @@ export const GeographyCanvas = forwardRef<
         queued?: boolean;
         message?: string;
         error?: string;
+        used_sketch_reference?: boolean;
+        warnings?: string[];
         canvas_meta?: {
           scenery_preview_url?: string | null;
           depth_preview_url?: string | null;
@@ -500,8 +516,16 @@ export const GeographyCanvas = forwardRef<
         meta?.depth_preview_url ?? data.depth_preview_url ?? null;
       if (depth) setDepthPreviewUrl(depth);
 
+      for (const warning of data.warnings ?? []) {
+        toastError(warning);
+      }
+
       if (data.queued) {
-        toastSuccess(data.message ?? "Scenery generation queued");
+        toastSuccess(
+          data.used_sketch_reference
+            ? (data.message ?? "Scenery queued from your map sketch")
+            : (data.message ?? "Scenery generation queued (text only)"),
+        );
       } else {
         toastError(
           data.message ??
@@ -515,7 +539,7 @@ export const GeographyCanvas = forwardRef<
     } finally {
       setSynthesizing(false);
     }
-  }, [apiAvailable, synthesizing, projectId, lines.length]);
+  }, [apiAvailable, synthesizing, projectId, lines, pins]);
 
   const toolbar = useMemo(
     () => (

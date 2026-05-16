@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { isAuthError, jsonError, requireAuth } from "@/lib/api-auth";
 import { extractCanvasMeta, patchCanvasMeta } from "@/lib/canvas-state";
 import { uploadCanvasSketchDataUrl } from "@/lib/canvas-sketch-upload";
-import { buildPrompt, falQueue, projectStyleConfig } from "@/lib/fal";
+import { FLUX_IMG2IMG_MODEL, FLUX_TEXT_MODEL, falQueue } from "@/lib/fal";
 import { falDepthMap } from "@/lib/fal-media";
+import { buildScenerySynthesisPrompt } from "@/lib/scenery-prompt";
 import { SCENERY_PENDING } from "@/lib/scenery-synthesis";
 import type { Json } from "@/types/db";
 
@@ -20,6 +21,7 @@ export async function POST(request: Request, context: RouteContext) {
       sketch_description?: string;
       reference_image_url?: string;
       sketch_data_url?: string;
+      has_strokes?: boolean;
     };
 
     const { data: project } = await supabase
@@ -32,22 +34,49 @@ export async function POST(request: Request, context: RouteContext) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
+    const { data: pins } = await supabase
+      .from("location_pins")
+      .select("label")
+      .eq("project_id", projectId);
+
+    const pinLabels = (pins ?? [])
+      .map((p) => p.label?.trim())
+      .filter((label): label is string => Boolean(label));
+
+    const clientSentSketch = Boolean(body.sketch_data_url?.trim());
     let referenceImageUrl = body.reference_image_url ?? null;
+    let sketchUploadFailed = false;
+
     if (!referenceImageUrl && body.sketch_data_url) {
       referenceImageUrl = await uploadCanvasSketchDataUrl(
         supabase,
         projectId,
         body.sketch_data_url,
       );
+      if (!referenceImageUrl) {
+        sketchUploadFailed = true;
+      }
     }
 
-    const styleConfig = projectStyleConfig(project);
-    const prompt = buildPrompt({
-      styleConfig,
-      description:
-        body.sketch_description ??
-        "Transform this sketch into a cinematic environment backdrop",
+    const hasSketchReference = Boolean(referenceImageUrl);
+    const prompt = buildScenerySynthesisPrompt({
+      project,
+      pinLabels,
+      hasSketchReference,
+      extraDescription: body.sketch_description,
     });
+
+    const warnings: string[] = [];
+    if (body.has_strokes === false) {
+      warnings.push(
+        "No brush strokes on the map — generating from theme and location names only.",
+      );
+    }
+    if (clientSentSketch && sketchUploadFailed) {
+      warnings.push(
+        "Could not upload the map sketch; generating from text only.",
+      );
+    }
 
     if (!process.env.FAL_KEY) {
       const canvasState = patchCanvasMeta(
@@ -55,6 +84,7 @@ export async function POST(request: Request, context: RouteContext) {
         {
           scenery_preview_url: null,
           scenery_fal_request_id: null,
+          scenery_fal_model: null,
           last_synthesis_at: new Date().toISOString(),
         },
       );
@@ -70,15 +100,21 @@ export async function POST(request: Request, context: RouteContext) {
           "Image generation is not configured. Set FAL_KEY on the server to enable scenery synthesis.",
         request_id: null,
         depth_preview_url: null,
+        used_sketch_reference: false,
+        warnings,
         canvas_meta: extractCanvasMeta(canvasState),
       });
     }
 
+    const falModel = hasSketchReference ? FLUX_IMG2IMG_MODEL : FLUX_TEXT_MODEL;
+
     const result = await falQueue({
       prompt,
+      model: falModel,
       imageUrl: referenceImageUrl ?? undefined,
       width: 1280,
       height: 720,
+      strength: hasSketchReference ? 0.88 : undefined,
     });
 
     let depthPreviewUrl: string | null = null;
@@ -91,6 +127,7 @@ export async function POST(request: Request, context: RouteContext) {
       {
         scenery_preview_url: result ? SCENERY_PENDING : null,
         scenery_fal_request_id: result?.requestId ?? null,
+        scenery_fal_model: result ? falModel : null,
         depth_preview_url: depthPreviewUrl,
         last_synthesis_at: new Date().toISOString(),
       },
@@ -104,10 +141,14 @@ export async function POST(request: Request, context: RouteContext) {
     return NextResponse.json({
       queued: Boolean(result),
       message: result
-        ? "Scenery generation queued"
+        ? hasSketchReference
+          ? "Scenery generation queued from your map sketch"
+          : "Scenery generation queued (text only)"
         : "Failed to queue scenery generation",
       request_id: result?.requestId ?? null,
       depth_preview_url: depthPreviewUrl,
+      used_sketch_reference: hasSketchReference,
+      warnings,
       canvas_meta: extractCanvasMeta(canvasState),
     });
   } catch (err) {

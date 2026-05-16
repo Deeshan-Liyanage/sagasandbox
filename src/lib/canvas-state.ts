@@ -18,6 +18,7 @@ export interface CanvasMeta {
   scenery_preview_url?: string | null;
   depth_preview_url?: string | null;
   scenery_fal_request_id?: string | null;
+  scenery_fal_model?: string | null;
   last_synthesis_at?: string | null;
 }
 
@@ -25,6 +26,7 @@ const META_KEYS: (keyof CanvasMeta)[] = [
   "scenery_preview_url",
   "depth_preview_url",
   "scenery_fal_request_id",
+  "scenery_fal_model",
   "last_synthesis_at",
 ];
 
