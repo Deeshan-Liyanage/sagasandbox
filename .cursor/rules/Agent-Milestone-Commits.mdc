@@ -11,6 +11,8 @@ Pair with [Branch-Naming.mdc](Branch-Naming.mdc): never commit on `main`; use a 
 
 Pair with [No-Secrets-In-Repo.mdc](No-Secrets-In-Repo.mdc): never stage API keys, tokens, or credentials — see that rule before every commit.
 
+Pair with [Agent-Verbose-Git-And-PR-Review.mdc](Agent-Verbose-Git-And-PR-Review.mdc): commit bodies and PR descriptions must be verbose; address review feedback after merge or close.
+
 ## When to commit (milestones)
 
 Commit when **all** of the following are true:
@@ -50,7 +52,7 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/):
 | `type` | Required. Same set as branches: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore` |
 | `scope` | Optional. Prefer project areas: `canvas`, `timeline`, `vault`, `copilot`, `export`, `api`, `db`, `ui` |
 | `description` | Imperative, lowercase, no trailing period, ≤72 chars |
-| `body` | Why/context when the diff is non-obvious |
+| `body` | **Required** for non-trivial work — see [Agent-Verbose-Git-And-PR-Review.mdc](Agent-Verbose-Git-And-PR-Review.mdc) |
 | `footer` | `BREAKING CHANGE:` or `Refs #123` when applicable |
 
 Examples:
