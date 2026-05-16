@@ -67,9 +67,19 @@ export async function PATCH(request: Request, context: RouteContext) {
         const styleConfig = projectStyleConfig(project);
         const prompt = `${styleConfig.aesthetic_style} character portrait: ${character.description ?? character.name}. Appearance: ${traits.hair ?? ""} hair, ${traits.build ?? ""} build, wearing ${traits.clothing ?? ""}. ${traits.features ?? ""}`;
         try {
-          await falQueue({ prompt, model: "fal-ai/flux/dev" });
-        } catch {
-          // non-blocking
+          const result = await falQueue({ prompt, model: "fal-ai/flux/dev" });
+          if (result) {
+            const updatePayload: Record<string, string> = {
+              gen_status: result.imageUrl ? "done" : "generating",
+              fal_request_id: result.requestId,
+            };
+            if (result.imageUrl) {
+              updatePayload.generated_portrait_url = result.imageUrl;
+            }
+            await supabase.from("characters").update(updatePayload).eq("id", character.id);
+          }
+        } catch (falErr) {
+          console.error("[characters PATCH] falQueue failed:", falErr);
         }
       }
     }

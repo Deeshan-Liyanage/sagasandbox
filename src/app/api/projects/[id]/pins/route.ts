@@ -56,19 +56,24 @@ export async function POST(request: Request, context: RouteContext) {
     try {
       const result = await falQueue({ prompt, model: "fal-ai/flux/dev" });
       if (result) {
+        const updatePayload: Record<string, string> = {
+          gen_status: result.imageUrl ? "done" : "generating",
+          fal_request_id: result.requestId,
+        };
+        if (result.imageUrl) {
+          updatePayload.generated_image_url = result.imageUrl;
+        }
         const { data: updated } = await supabase
           .from("location_pins")
-          .update({
-            gen_status: "generating",
-            fal_request_id: result.requestId,
-          })
+          .update(updatePayload)
           .eq("id", pin.id)
           .select()
           .single();
 
         return NextResponse.json({ pin: updated ?? pin }, { status: 201 });
       }
-    } catch {
+    } catch (falErr) {
+      console.error("[pins POST] falQueue failed:", falErr);
       // Return pin without generation if fal fails
     }
 

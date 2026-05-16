@@ -79,19 +79,23 @@ export async function POST(request: Request, context: RouteContext) {
         imageUrl: character.reference_image_url ?? undefined,
       });
       if (result) {
+        const updatePayload: Record<string, string> = {
+          gen_status: result.imageUrl ? "done" : "generating",
+          fal_request_id: result.requestId,
+        };
+        if (result.imageUrl) {
+          updatePayload.generated_portrait_url = result.imageUrl;
+        }
         const { data: updated } = await supabase
           .from("characters")
-          .update({
-            gen_status: "generating",
-            fal_request_id: result.requestId,
-          })
+          .update(updatePayload)
           .eq("id", character.id)
           .select()
           .single();
         return NextResponse.json({ character: updated ?? character }, { status: 201 });
       }
-    } catch {
-      // fal may be unavailable during local dev
+    } catch (falErr) {
+      console.error("[characters POST] falQueue failed:", falErr);
     }
 
     return NextResponse.json({ character }, { status: 201 });

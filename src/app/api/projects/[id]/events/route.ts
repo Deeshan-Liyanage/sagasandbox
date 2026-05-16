@@ -67,12 +67,16 @@ async function triggerEventGeneration(
   });
 
   if (result) {
+    const updatePayload: Record<string, string> = {
+      gen_status: result.imageUrl ? "done" : "generating",
+      fal_request_id: result.requestId,
+    };
+    if (result.imageUrl) {
+      updatePayload.generated_image_url = result.imageUrl;
+    }
     await supabase
       .from("timeline_events")
-      .update({
-        gen_status: "generating",
-        fal_request_id: result.requestId,
-      })
+      .update(updatePayload)
       .eq("id", event.id);
   }
 }

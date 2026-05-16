@@ -2,8 +2,18 @@ import { fal } from "@fal-ai/client"
 
 import type { StyleConfig } from "@/types/app"
 
-if (process.env.FAL_KEY) {
-  fal.config({ credentials: process.env.FAL_KEY })
+// Trim any accidental leading/trailing whitespace from env values
+const FAL_KEY = process.env.FAL_KEY?.trim()
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL?.trim()
+
+if (FAL_KEY) {
+  fal.config({ credentials: FAL_KEY })
+}
+
+/** True when running against localhost — fal.ai webhooks cannot reach localhost. */
+function isLocalDev(): boolean {
+  if (!SITE_URL) return true
+  return SITE_URL.includes("localhost") || SITE_URL.includes("127.0.0.1")
 }
 
 export interface FalQueueOptions {
@@ -16,13 +26,26 @@ export interface FalQueueOptions {
 
 export interface FalQueueResult {
   requestId: string
+  /** Immediately available image URL when synchronous path was used (local dev). */
+  imageUrl?: string
 }
 
+/**
+ * Submits an image-generation job to fal.ai.
+ *
+ * - **Production** (NEXT_PUBLIC_SITE_URL points to Vercel/public host):
+ *   Uses `fal.queue.submit()` with a webhook. The webhook calls
+ *   `/api/webhooks/fal` → Supabase edge function → updates DB.
+ *
+ * - **Local dev** (localhost or no SITE_URL):
+ *   Uses `fal.subscribe()` which polls until done and returns the result
+ *   immediately. The caller receives `imageUrl` and can update the DB directly.
+ */
 export async function falQueue(
   options: FalQueueOptions,
 ): Promise<FalQueueResult | null> {
-  if (!process.env.FAL_KEY) {
-    console.warn("FAL_KEY not set — skipping image generation queue")
+  if (!FAL_KEY) {
+    console.warn("[fal] FAL_KEY not set — skipping image generation")
     return null
   }
 
@@ -46,15 +69,45 @@ export async function falQueue(
     input.strength = 0.75
   }
 
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL
-  const webhookUrl = siteUrl ? `${siteUrl}/api/webhooks/fal` : undefined
+  if (isLocalDev()) {
+    // Synchronous path: poll fal until image is ready.
+    // Works in local dev where fal cannot reach localhost for webhooks.
+    console.log("[fal] Local dev — using fal.subscribe() (synchronous)")
+    try {
+      const result = await fal.subscribe(model, {
+        input,
+        pollInterval: 3000,
+        logs: false,
+      })
+      const data = result.data as {
+        images?: Array<{ url: string }>
+        image?: { url: string }
+      }
+      const resolvedImageUrl = data.images?.[0]?.url ?? data.image?.url
+      // fal.subscribe doesn't expose request_id directly; use a synthetic one
+      const requestId = result.requestId ?? `local-${Date.now()}`
+      return { requestId, imageUrl: resolvedImageUrl }
+    } catch (err) {
+      console.error("[fal] fal.subscribe() failed:", err)
+      throw err
+    }
+  }
 
-  const { request_id } = await fal.queue.submit(model, {
-    input,
-    ...(webhookUrl ? { webhookUrl } : {}),
-  })
+  // Production path: async queue with webhook.
+  const webhookUrl = `${SITE_URL}/api/webhooks/fal`
+  console.log(`[fal] Submitting to queue with webhook: ${webhookUrl}`)
 
-  return { requestId: request_id }
+  try {
+    const { request_id } = await fal.queue.submit(model, {
+      input,
+      webhookUrl,
+    })
+    console.log(`[fal] Queued request_id=${request_id}`)
+    return { requestId: request_id }
+  } catch (err) {
+    console.error("[fal] fal.queue.submit() failed:", err)
+    throw err
+  }
 }
 
 export function buildPrompt(parts: {
