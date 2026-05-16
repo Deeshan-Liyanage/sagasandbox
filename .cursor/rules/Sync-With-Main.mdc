@@ -1,0 +1,51 @@
+---
+description: Prefer working from an up-to-date main when it improves accuracy (soft guideline)
+alwaysApply: true
+---
+
+# Sync with main (when appropriate)
+
+**Guideline (not mandatory):** When it helps correctness and reduces rework, agents should **fetch and align with the latest `main`** before or during work. Skip this when it would harm the user’s intent or create unnecessary risk.
+
+Pair with [Branch-Naming.mdc](Branch-Naming.mdc): branch from current `main`, then implement on a feature branch.
+
+## When to sync
+
+Prefer updating your base when **any** of these apply:
+
+- Starting a **new task** or feature branch
+- Returning to the repo after **time away** or a long session
+- You need **current APIs, types, routes, or rules** that may have changed on `main`
+- Before opening or updating a **PR**, to catch conflicts early
+- The user’s request references files or behavior that may have landed on `main` since your last fetch
+
+Typical flow (PowerShell):
+
+```powershell
+git fetch origin
+git pull origin main          # when on main in this worktree, or after checkout
+# — or on a feature branch —
+git merge origin/main         # or: git rebase origin/main (only if user prefers rebase)
+```
+
+Use the approach that matches the repo’s existing branch history; **do not force-push** unless the user explicitly asks.
+
+## When to skip or defer
+
+Do **not** sync blindly if:
+
+- The user asked you to work on a **specific branch or commit** as-is
+- You would **overwrite uncommitted work** — commit or stash first (see [Agent-Milestone-Commits.mdc](Agent-Milestone-Commits.mdc))
+- A **merge/rebase conflict** is unresolved and the user has not asked you to integrate `main`
+- Pulling would **disrupt an in-progress review** (e.g. “only fix line 42 on this branch”)
+- You are in a **detached HEAD** or worktree setup where `main` is checked out elsewhere — use `git fetch origin` and merge/rebase `origin/main` into your current branch instead
+
+## After syncing
+
+- Re-read changed files in your task area before editing
+- Re-run install/build if `package.json` or lockfiles changed
+- Note merge conflicts to the user with a short plan to resolve them
+
+## Worktrees
+
+If `git checkout main` fails because `main` is checked out in another worktree, stay on your branch and run `git fetch origin` then `git merge origin/main` (or create a fresh branch from `origin/main` for new work).

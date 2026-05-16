@@ -45,7 +45,7 @@ refactor/vault-store-split
 
 ## Agent workflow
 
-1. **Never** commit directly to `main`. Branch from latest `main`, then open a PR.
+1. **Never** commit directly to `main`. Branch from latest `main`, then open a PR. When practical, sync first — see [Sync-With-Main.mdc](Sync-With-Main.mdc).
 2. Pick `type` from the **upcoming commit’s** primary intent (same type you would use in the commit subject).
 3. If the branch will hold multiple unrelated changes, split into separate branches instead of one broad name.
 4. Before pushing, confirm the branch name matches this pattern; rename with `git branch -m` if needed.
