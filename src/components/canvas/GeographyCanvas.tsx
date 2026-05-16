@@ -19,7 +19,6 @@ export type CanvasTool = "brush" | "pan";
 
 export interface GeographyCanvasProps {
   projectId: string;
-  initialPins: LocationPin[];
   pins: LocationPin[];
   onPinsChange: (pins: LocationPin[]) => void;
   onPinSelect: (pin: LocationPin) => void;
@@ -42,7 +41,6 @@ function pinColor(status: LocationPin["gen_status"]) {
 
 export function GeographyCanvas({
   projectId,
-  initialPins,
   pins,
   onPinsChange,
   onPinSelect,
@@ -76,10 +74,6 @@ export function GeographyCanvas({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-
-  useEffect(() => {
-    onPinsChange(initialPins);
-  }, [initialPins, onPinsChange]);
 
   const handleWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault();

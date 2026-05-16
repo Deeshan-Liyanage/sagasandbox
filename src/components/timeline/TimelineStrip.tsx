@@ -19,13 +19,15 @@ import { CSS } from "@dnd-kit/utilities";
 import { Check, Loader2, Plus } from "lucide-react";
 import type { LocationPin, TimelineEvent } from "@/types/app";
 import type { Character } from "@/types/app";
+import { asGenStatus } from "@/types/app";
 import { GenStatusImage } from "@/components/shared/GenStatusImage";
+import { RemoteImage } from "@/components/shared/RemoteImage";
 interface TimelineStripProps {
   projectId: string;
   events: TimelineEvent[];
   pins: LocationPin[];
   characters: Character[];
-  onEventsChange: (events: TimelineEvent[]) => void;
+  onEventsChange: React.Dispatch<React.SetStateAction<TimelineEvent[]>>;
 }
 
 export function TimelineStrip({
@@ -67,7 +69,7 @@ export function TimelineStrip({
       gen_status: "pending",
       created_at: new Date().toISOString(),
     };
-    onEventsChange([...events, optimistic]);
+    onEventsChange((prev) => [...prev, optimistic]);
     setShowAdd(false);
     try {
       const res = await fetch(`/api/projects/${projectId}/events`, {
@@ -82,14 +84,14 @@ export function TimelineStrip({
       });
       if (!res.ok) throw new Error("Create failed");
       const { event } = (await res.json()) as { event: TimelineEvent };
-      onEventsChange(
-        [...events.filter((ev) => ev.id !== optimistic.id), event].sort(
+      onEventsChange((prev) =>
+        [...prev.filter((ev) => ev.id !== optimistic.id), event].sort(
           (a, b) => a.sequence_order - b.sequence_order,
         ),
       );
       setForm({ title: "", description: "", pin_id: "" });
     } catch {
-      onEventsChange(events.filter((ev) => ev.id !== optimistic.id));
+      onEventsChange((prev) => prev.filter((ev) => ev.id !== optimistic.id));
     }
   }
 
@@ -251,9 +253,11 @@ function SortableEventCard({
       >
         <div className="relative h-10 shrink-0 overflow-hidden bg-[#252528]">
           {event.gen_status === "done" && event.generated_image_url ? (
-            <img
+            <RemoteImage
               src={event.generated_image_url}
               alt=""
+              width={160}
+              height={40}
               className="h-full w-full object-cover"
             />
           ) : event.gen_status === "generating" ? (
@@ -277,7 +281,7 @@ function SortableEventCard({
       {expanded ? (
         <div className="absolute bottom-full left-0 z-20 mb-2 w-64 rounded-lg border border-[#2a2a2e] bg-[#1a1a1e] p-3 shadow-xl">
           <GenStatusImage
-            status={event.gen_status}
+            status={asGenStatus(event.gen_status)}
             imageUrl={event.generated_image_url}
             alt={event.title}
             className="mb-2"

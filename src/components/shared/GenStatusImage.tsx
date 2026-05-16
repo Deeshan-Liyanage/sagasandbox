@@ -4,6 +4,7 @@ import { Loader2, RefreshCw } from "lucide-react";
 import type { GenStatus } from "@/types/app";
 import { cn } from "@/lib/cn";
 import { GEN_STATUS_COLORS } from "@/lib/constants";
+import { RemoteImage } from "@/components/shared/RemoteImage";
 
 interface GenStatusImageProps {
   status: GenStatus;
@@ -22,11 +23,13 @@ export function GenStatusImage({
 }: GenStatusImageProps) {
   if (status === "done" && imageUrl) {
     return (
-      <img
+      <RemoteImage
         src={imageUrl}
         alt={alt}
+        width={640}
+        height={360}
         className={cn(
-          "aspect-video w-full rounded-lg object-cover",
+          "aspect-video h-auto w-full rounded-lg object-cover",
           className,
         )}
       />

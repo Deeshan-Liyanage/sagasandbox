@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
-import { createClient } from "@/lib/supabase-client";
+import { useEffect, useRef } from "react";
+import { createClient, isSupabaseConfigured } from "@/lib/supabase-client";
 import type {
   Character,
   Export,
@@ -30,15 +30,20 @@ export function useProjectRealtime(
   projectId: string,
   handlers: ProjectRealtimeHandlers,
 ) {
+  const handlersRef = useRef(handlers);
   useEffect(() => {
-    if (!projectId) return;
+    handlersRef.current = handlers;
+  });
+
+  useEffect(() => {
+    if (!projectId || !isSupabaseConfigured()) return;
 
     const supabase = createClient();
     const channel = supabase.channel(`project:${projectId}`);
 
     channel
       .on("broadcast", { event: "canvas_op" }, ({ payload }) => {
-        handlers.onCanvasOp(payload as CanvasOpPayload);
+        handlersRef.current.onCanvasOp(payload as CanvasOpPayload);
       })
       .on(
         "postgres_changes",
@@ -48,7 +53,7 @@ export function useProjectRealtime(
           table: "location_pins",
           filter: `project_id=eq.${projectId}`,
         },
-        ({ new: pin }) => handlers.onPinUpdate(pin as LocationPin),
+        ({ new: pin }) => handlersRef.current.onPinUpdate(pin as LocationPin),
       )
       .on(
         "postgres_changes",
@@ -58,7 +63,8 @@ export function useProjectRealtime(
           table: "timeline_events",
           filter: `project_id=eq.${projectId}`,
         },
-        ({ new: event }) => handlers.onEventUpdate(event as TimelineEvent),
+        ({ new: event }) =>
+          handlersRef.current.onEventUpdate(event as TimelineEvent),
       )
       .on(
         "postgres_changes",
@@ -68,7 +74,7 @@ export function useProjectRealtime(
           table: "exports",
           filter: `project_id=eq.${projectId}`,
         },
-        ({ new: exp }) => handlers.onExportUpdate(exp as Export),
+        ({ new: exp }) => handlersRef.current.onExportUpdate(exp as Export),
       )
       .on(
         "postgres_changes",
@@ -79,14 +85,13 @@ export function useProjectRealtime(
           filter: `project_id=eq.${projectId}`,
         },
         ({ new: character }) =>
-          handlers.onCharacterUpdate?.(character as Character),
+          handlersRef.current.onCharacterUpdate?.(character as Character),
       )
       .subscribe();
 
     return () => {
       void supabase.removeChannel(channel);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- handlers stabilized by parent useMemo
   }, [projectId]);
 }
 
@@ -94,6 +99,8 @@ export async function broadcastCanvasOp(
   projectId: string,
   op: CanvasOpPayload,
 ) {
+  if (!isSupabaseConfigured()) return;
+
   const supabase = createClient();
   await supabase.channel(`project:${projectId}`).send({
     type: "broadcast",

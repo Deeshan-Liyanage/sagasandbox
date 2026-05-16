@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Download } from "lucide-react";
 import type { Export, ExportType, TimelineEvent } from "@/types/app";
+import { RemoteImage } from "@/components/shared/RemoteImage";
 import { cn } from "@/lib/cn";
 
 interface ExportTerminalProps {
@@ -60,6 +61,9 @@ export function ExportTerminal({
     }
     setSubmitting(true);
     setError(null);
+    setDownloadUrl(null);
+    setExportStatus(null);
+    setCurrentExportId(null);
     try {
       const res = await fetch(`/api/projects/${projectId}/exports`, {
         method: "POST",
@@ -145,9 +149,11 @@ export function ExportTerminal({
                 className="accent-[#7c3aed]"
               />
               {ev.generated_image_url ? (
-                <img
+                <RemoteImage
                   src={ev.generated_image_url}
                   alt=""
+                  width={56}
+                  height={40}
                   className="h-10 w-14 rounded object-cover"
                 />
               ) : (

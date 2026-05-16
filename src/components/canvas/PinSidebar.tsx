@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Trash2, X } from "lucide-react";
 import type { LocationPin } from "@/types/app";
+import { asGenStatus } from "@/types/app";
 import { GenStatusImage } from "@/components/shared/GenStatusImage";
 
 export interface PinSidebarProps {
@@ -97,10 +98,12 @@ export function PinSidebar({
 
       <div className="flex-1 space-y-4 overflow-y-auto p-4">
         <GenStatusImage
-          status={activePin.gen_status}
+          status={asGenStatus(activePin.gen_status)}
           imageUrl={activePin.generated_image_url}
           alt={activePin.label}
-          onRetry={activePin.gen_status === "error" ? handleRetry : undefined}
+          onRetry={
+            asGenStatus(activePin.gen_status) === "error" ? handleRetry : undefined
+          }
         />
 
         <label className="block">

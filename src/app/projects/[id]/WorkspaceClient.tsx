@@ -74,7 +74,9 @@ export function WorkspaceClient({
   const handleEventUpdate = useCallback(
     (event: TimelineEvent) => {
       setEvents((prev) => prev.map((e) => (e.id === event.id ? event : e)));
-      setActiveEvent(event);
+      if (useUIStore.getState().activeEvent?.id === event.id) {
+        setActiveEvent(event);
+      }
     },
     [setActiveEvent],
   );
@@ -151,7 +153,6 @@ export function WorkspaceClient({
         <ErrorBoundary>
           <GeographyCanvas
             projectId={project.id}
-            initialPins={initialPins}
             pins={pins}
             onPinsChange={setPins}
             onPinSelect={(pin) => {
