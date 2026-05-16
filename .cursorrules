@@ -1,0 +1,7 @@
+# SagaSandbox AI Stack Rules
+- You are using **Next.js 16 (App Router)** and **React 19**.
+- You are using **Tailwind CSS v4**. Do not generate a `tailwind.config.js`. All styles are configured in `src/app/globals.css` via `@import "tailwindcss";`.
+- PostCSS must use `@tailwindcss/postcss`.
+- Database mapping uses **Prisma ORM** pointing to PostgreSQL (Supabase).
+- Local states use **Zustand**.
+- Run `npm run dev` or build checks whenever you modify layout configurations to verify the TypeScript types resolve flawlessly.
