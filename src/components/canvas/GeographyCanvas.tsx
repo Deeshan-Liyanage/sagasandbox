@@ -206,6 +206,12 @@ export const GeographyCanvas = forwardRef<
     return () => ro.disconnect();
   }, []);
 
+  const persistCanvas = useCallback(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    onCanvasChange(JSON.parse(stage.toJSON()) as object);
+  }, [onCanvasChange]);
+
   const handleWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault();
     const stage = stageRef.current;
@@ -231,9 +237,12 @@ export const GeographyCanvas = forwardRef<
       y: pointer.y - mousePointTo.y * newScale,
     };
 
+    stage.scale({ x: newScale, y: newScale });
+    stage.position(newPos);
+    onCanvasChange(JSON.parse(stage.toJSON()) as object);
     setScale(newScale);
     setStagePos(newPos);
-  }, []);
+  }, [onCanvasChange]);
 
   const getStagePoint = useCallback(() => {
     const stage = stageRef.current;
@@ -243,12 +252,6 @@ export const GeographyCanvas = forwardRef<
     const transform = stage.getAbsoluteTransform().copy().invert();
     return transform.point(pos);
   }, []);
-
-  const persistCanvas = useCallback(() => {
-    const stage = stageRef.current;
-    if (!stage) return;
-    onCanvasChange(JSON.parse(stage.toJSON()) as object);
-  }, [onCanvasChange]);
 
   const handlePointerDown = useCallback(() => {
     if (tool === "pan") return;
@@ -397,7 +400,9 @@ export const GeographyCanvas = forwardRef<
         onClick={handleStageClick}
         onDragEnd={(e) => {
           if (tool === "pan") {
-            setStagePos({ x: e.target.x(), y: e.target.y() });
+            const pos = { x: e.target.x(), y: e.target.y() };
+            setStagePos(pos);
+            persistCanvas();
           }
         }}
         className="cursor-crosshair"

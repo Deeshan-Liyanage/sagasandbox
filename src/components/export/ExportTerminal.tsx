@@ -25,6 +25,27 @@ const EXPORT_TYPES: { id: ExportType; label: string }[] = [
   { id: "audio_script", label: "Audio Script" },
 ];
 
+/** `audio_script` exports store a JSON array of URLs in `output_url`. */
+function resolveExportDownloadUrl(
+  type: ExportType,
+  outputUrl: string | null | undefined,
+  signedUrl?: string | null,
+): string | null {
+  if (signedUrl) return signedUrl;
+  if (!outputUrl) return null;
+  if (type === "audio_script") {
+    try {
+      const parsed = JSON.parse(outputUrl) as unknown;
+      if (Array.isArray(parsed) && typeof parsed[0] === "string") {
+        return parsed[0];
+      }
+    } catch {
+      // fall through — output_url may already be a single URL
+    }
+  }
+  return outputUrl;
+}
+
 function progressWidth(status: Export["status"] | null) {
   switch (status) {
     case "queued":
@@ -111,7 +132,7 @@ export function ExportTerminal({
   const displayStatus = realtimeExport?.status ?? exportStatus;
   const displayDownloadUrl =
     realtimeExport?.status === "done"
-      ? (realtimeExport.output_url ?? downloadUrl)
+      ? resolveExportDownloadUrl(exportType, realtimeExport.output_url, null)
       : downloadUrl;
   const displayError =
     realtimeExport?.status === "error" ? "Export failed" : error;
@@ -139,7 +160,13 @@ export function ExportTerminal({
         setExportStatus(data.export.status);
         onExportUpdate?.(data.export);
         if (data.export.status === "done") {
-          setDownloadUrl(data.signed_url ?? data.export.output_url);
+          setDownloadUrl(
+            resolveExportDownloadUrl(
+              exportType,
+              data.export.output_url,
+              data.signed_url,
+            ),
+          );
           clearInterval(interval);
         }
         if (data.export.status === "error") {
@@ -155,6 +182,7 @@ export function ExportTerminal({
   }, [
     currentExportId,
     projectId,
+    exportType,
     onExportUpdate,
     realtimeActive,
     realtimeExport?.status,
