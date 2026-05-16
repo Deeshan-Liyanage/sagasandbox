@@ -21,9 +21,61 @@ export interface CanvasOpPayload {
 export interface ProjectRealtimeHandlers {
   onCanvasOp: (op: CanvasOpPayload) => void;
   onPinUpdate: (pin: LocationPin) => void;
+  onPinInsert?: (pin: LocationPin) => void;
+  onPinDelete?: (pinId: string) => void;
   onEventUpdate: (event: TimelineEvent) => void;
+  onEventInsert?: (event: TimelineEvent) => void;
+  onEventDelete?: (eventId: string) => void;
   onExportUpdate: (exp: Export) => void;
   onCharacterUpdate?: (character: Character) => void;
+  onCharacterInsert?: (character: Character) => void;
+  onCharacterDelete?: (characterId: string) => void;
+}
+
+function subscribeTable<T>(
+  channel: ReturnType<ReturnType<typeof createClient>["channel"]>,
+  table: string,
+  projectId: string,
+  handlers: {
+    onUpdate: (row: T) => void;
+    onInsert?: (row: T) => void;
+    onDelete?: (id: string) => void;
+  },
+) {
+  channel
+    .on(
+      "postgres_changes",
+      {
+        event: "UPDATE",
+        schema: "public",
+        table,
+        filter: `project_id=eq.${projectId}`,
+      },
+      ({ new: row }) => handlers.onUpdate(row as T),
+    )
+    .on(
+      "postgres_changes",
+      {
+        event: "INSERT",
+        schema: "public",
+        table,
+        filter: `project_id=eq.${projectId}`,
+      },
+      ({ new: row }) => handlers.onInsert?.(row as T),
+    )
+    .on(
+      "postgres_changes",
+      {
+        event: "DELETE",
+        schema: "public",
+        table,
+        filter: `project_id=eq.${projectId}`,
+      },
+      ({ old }) => {
+        const id = (old as { id?: string }).id;
+        if (id) handlers.onDelete?.(id);
+      },
+    );
 }
 
 export function useProjectRealtime(
@@ -41,53 +93,40 @@ export function useProjectRealtime(
     const supabase = createClient();
     const channel = supabase.channel(`project:${projectId}`);
 
-    channel
-      .on("broadcast", { event: "canvas_op" }, ({ payload }) => {
-        handlersRef.current.onCanvasOp(payload as CanvasOpPayload);
-      })
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "location_pins",
-          filter: `project_id=eq.${projectId}`,
-        },
-        ({ new: pin }) => handlersRef.current.onPinUpdate(pin as LocationPin),
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "timeline_events",
-          filter: `project_id=eq.${projectId}`,
-        },
-        ({ new: event }) =>
-          handlersRef.current.onEventUpdate(event as TimelineEvent),
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "exports",
-          filter: `project_id=eq.${projectId}`,
-        },
-        ({ new: exp }) => handlersRef.current.onExportUpdate(exp as Export),
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "characters",
-          filter: `project_id=eq.${projectId}`,
-        },
-        ({ new: character }) =>
-          handlersRef.current.onCharacterUpdate?.(character as Character),
-      )
-      .subscribe();
+    channel.on("broadcast", { event: "canvas_op" }, ({ payload }) => {
+      handlersRef.current.onCanvasOp(payload as CanvasOpPayload);
+    });
+
+    subscribeTable<LocationPin>(channel, "location_pins", projectId, {
+      onUpdate: (pin) => handlersRef.current.onPinUpdate(pin),
+      onInsert: (pin) => handlersRef.current.onPinInsert?.(pin),
+      onDelete: (id) => handlersRef.current.onPinDelete?.(id),
+    });
+
+    subscribeTable<TimelineEvent>(channel, "timeline_events", projectId, {
+      onUpdate: (event) => handlersRef.current.onEventUpdate(event),
+      onInsert: (event) => handlersRef.current.onEventInsert?.(event),
+      onDelete: (id) => handlersRef.current.onEventDelete?.(id),
+    });
+
+    subscribeTable<Character>(channel, "characters", projectId, {
+      onUpdate: (character) => handlersRef.current.onCharacterUpdate?.(character),
+      onInsert: (character) => handlersRef.current.onCharacterInsert?.(character),
+      onDelete: (id) => handlersRef.current.onCharacterDelete?.(id),
+    });
+
+    channel.on(
+      "postgres_changes",
+      {
+        event: "UPDATE",
+        schema: "public",
+        table: "exports",
+        filter: `project_id=eq.${projectId}`,
+      },
+      ({ new: exp }) => handlersRef.current.onExportUpdate(exp as Export),
+    );
+
+    channel.subscribe();
 
     return () => {
       void supabase.removeChannel(channel);
@@ -137,7 +176,6 @@ function getBroadcastChannel(projectId: string): BroadcastChannelEntry {
   return entry;
 }
 
-/** Broadcast canvas ops on a subscribed channel so peers receive cursor/brush updates. */
 export async function broadcastCanvasOp(
   projectId: string,
   op: CanvasOpPayload,

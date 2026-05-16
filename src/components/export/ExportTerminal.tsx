@@ -21,8 +21,9 @@ interface ExportTerminalProps {
 }
 
 const EXPORT_TYPES: { id: ExportType; label: string }[] = [
-  { id: "storyboard_pdf", label: "Storyboard PDF" },
-  { id: "audio_script", label: "Audio Script" },
+  { id: "storyboard_pdf", label: "Storyboard bundle (JSON)" },
+  { id: "audio_script", label: "Narration audio (Kokoro)" },
+  { id: "animatic_video", label: "Animatic video (Luma)" },
 ];
 
 /** `audio_script` exports store a JSON array of URLs in `output_url`. */

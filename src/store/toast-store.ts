@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type ToastVariant = "error" | "info";
+export type ToastVariant = "error" | "info" | "success";
 
 export interface ToastItem {
   id: string;
@@ -35,4 +35,8 @@ export const useToastStore = create<ToastState>((set) => ({
 
 export function toastError(message: string) {
   useToastStore.getState().push(message, "error");
+}
+
+export function toastSuccess(message: string) {
+  useToastStore.getState().push(message, "success");
 }

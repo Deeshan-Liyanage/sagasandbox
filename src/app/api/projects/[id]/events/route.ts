@@ -49,6 +49,11 @@ async function triggerEventGeneration(
     if (pin?.generated_image_url) imageUrl = pin.generated_image_url;
   }
 
+  const refChar = matched.find((c) => c.reference_image_url);
+  if (refChar?.reference_image_url) {
+    imageUrl = refChar.reference_image_url;
+  }
+
   const prompt = buildPrompt({
     styleConfig,
     description: `scene: ${description}`,
@@ -106,6 +111,7 @@ export async function POST(request: Request, context: RouteContext) {
       sequence_order: number;
       pin_id?: string;
       in_world_time?: string;
+      is_ghost?: boolean;
     };
 
     if (!body.title || body.sequence_order === undefined) {
@@ -124,6 +130,7 @@ export async function POST(request: Request, context: RouteContext) {
         sequence_order: body.sequence_order,
         pin_id: body.pin_id ?? null,
         in_world_time: body.in_world_time ?? null,
+        is_ghost: body.is_ghost ?? false,
         gen_status: "pending",
       })
       .select()

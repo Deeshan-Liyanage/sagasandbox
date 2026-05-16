@@ -73,7 +73,11 @@ export async function POST(request: Request, context: RouteContext) {
     const prompt = `${styleConfig.aesthetic_style} character portrait: ${body.description ?? body.name}. Appearance: ${traits.hair ?? ""} hair, ${traits.build ?? ""} build, wearing ${traits.clothing ?? ""}. ${traits.features ?? ""}`;
 
     try {
-      const result = await falQueue({ prompt, model: "fal-ai/flux/dev" });
+      const result = await falQueue({
+        prompt,
+        model: "fal-ai/flux/dev",
+        imageUrl: character.reference_image_url ?? undefined,
+      });
       if (result) {
         const { data: updated } = await supabase
           .from("characters")

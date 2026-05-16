@@ -61,6 +61,8 @@ Deno.serve(async (req) => {
       await processStoryboardPdf(export_id, exportRow.project_id, events ?? [])
     } else if (exportRow.type === "audio_script") {
       await processAudioScript(export_id, exportRow.project_id, events ?? [])
+    } else if (exportRow.type === "animatic_video") {
+      await processAnimaticVideo(export_id, exportRow.project_id, events ?? [])
     }
 
     await supabase.from("exports").update({ status: "done" }).eq("id", export_id)
@@ -232,5 +234,66 @@ async function processAudioScript(exportId: string, projectId: string, events: T
   await supabase
     .from("exports")
     .update({ output_url: JSON.stringify(audioUrls) })
+    .eq("id", exportId)
+}
+
+async function processAnimaticVideo(
+  exportId: string,
+  projectId: string,
+  events: TimelineEventRow[],
+) {
+  const prompt =
+    events.map((e) => e.description ?? e.title).filter(Boolean).join(". ") ||
+    "Cinematic story animatic"
+
+  let videoJobUrl: string | null = null
+  if (FAL_KEY) {
+    const imageUrl = events.find((e) => e.generated_image_url)?.generated_image_url
+    try {
+      const body: Record<string, unknown> = { prompt }
+      if (imageUrl) body.image_url = imageUrl
+      const res = await fetch("https://queue.fal.run/fal-ai/luma-dream-machine", {
+        method: "POST",
+        headers: {
+          Authorization: `Key ${FAL_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      })
+      if (res.ok) {
+        const json = await res.json() as { request_id?: string }
+        videoJobUrl = json.request_id
+          ? `https://queue.fal.run/fal-ai/luma-dream-machine/requests/${json.request_id}`
+          : null
+      }
+    } catch {
+      // keep manifest-only fallback
+    }
+  }
+
+  const manifest = {
+    type: "animatic_video",
+    project_id: projectId,
+    prompt,
+    video_job_url: videoJobUrl,
+    panels: events.map((e) => ({
+      title: e.title,
+      image_url: e.generated_image_url,
+    })),
+  }
+
+  const blob = new Blob([JSON.stringify(manifest, null, 2)], {
+    type: "application/json",
+  })
+  const path = `exports/${exportId}/animatic.json`
+
+  await supabase.storage.from("exports").upload(path, blob, { upsert: true })
+  const { data: signed } = await supabase.storage
+    .from("exports")
+    .createSignedUrl(path, 60 * 60 * 24)
+
+  await supabase
+    .from("exports")
+    .update({ output_url: signed?.signedUrl ?? path })
     .eq("id", exportId)
 }

@@ -21,6 +21,8 @@ export async function PATCH(request: Request, context: RouteContext) {
       sequence_order?: number;
       pin_id?: string | null;
       in_world_time?: string;
+      is_ghost?: boolean;
+      audio_summary?: string;
     };
 
     const { data: existing } = await supabase
@@ -40,6 +42,8 @@ export async function PATCH(request: Request, context: RouteContext) {
     if (body.sequence_order !== undefined) updates.sequence_order = body.sequence_order;
     if (body.pin_id !== undefined) updates.pin_id = body.pin_id;
     if (body.in_world_time !== undefined) updates.in_world_time = body.in_world_time;
+    if (body.is_ghost !== undefined) updates.is_ghost = body.is_ghost;
+    if (body.audio_summary !== undefined) updates.audio_summary = body.audio_summary;
 
     const descriptionChanged =
       body.description !== undefined && body.description !== existing.description;
@@ -86,6 +90,11 @@ export async function PATCH(request: Request, context: RouteContext) {
             .eq("id", event.pin_id)
             .single();
           if (pin?.generated_image_url) imageUrl = pin.generated_image_url;
+        }
+
+        const refChar = matched.find((c) => c.reference_image_url);
+        if (refChar?.reference_image_url) {
+          imageUrl = refChar.reference_image_url;
         }
 
         const prompt = buildPrompt({

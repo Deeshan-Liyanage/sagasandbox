@@ -21,6 +21,7 @@ export interface AppShellProps {
   activeNav?: SidebarNav;
   onNavChange?: (nav: SidebarNav) => void;
   onExportClick?: () => void;
+  headerActions?: React.ReactNode;
 }
 
 const NAV_ITEMS: { id: SidebarNav; label: string; icon: typeof Map }[] = [
@@ -39,6 +40,7 @@ export function AppShell({
   activeNav = "canvas",
   onNavChange,
   onExportClick,
+  headerActions,
 }: AppShellProps) {
   const accent = themeAccent(theme);
 
@@ -59,14 +61,17 @@ export function AppShell({
             {theme.replace(/_/g, " ")}
           </span>
         </div>
-        <button
-          type="button"
-          onClick={onExportClick}
-          className="inline-flex items-center gap-2 rounded-md border border-[#2a2a2e] bg-[#1a1a1e] px-3 py-1.5 text-sm font-medium transition hover:border-[#7c3aed] hover:text-white"
-        >
-          <Download className="h-4 w-4" />
-          Export
-        </button>
+        <div className="flex items-center gap-2">
+          {headerActions}
+          <button
+            type="button"
+            onClick={onExportClick}
+            className="inline-flex items-center gap-2 rounded-md border border-[#2a2a2e] bg-[#1a1a1e] px-3 py-1.5 text-sm font-medium transition hover:border-[#7c3aed] hover:text-white"
+          >
+            <Download className="h-4 w-4" />
+            Export
+          </button>
+        </div>
       </header>
 
       <div className="flex min-h-0 flex-1">

@@ -15,7 +15,7 @@ export async function POST(request: Request, context: RouteContext) {
 
   try {
     const body = (await request.json()) as {
-      type: "storyboard_pdf" | "audio_script";
+      type: "storyboard_pdf" | "audio_script" | "animatic_video";
       event_ids: string[];
     };
 
