@@ -4,16 +4,39 @@ import type { StyleConfig } from "@/types/app"
 
 // Trim any accidental leading/trailing whitespace from env values
 const FAL_KEY = process.env.FAL_KEY?.trim()
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL?.trim()
 
 if (FAL_KEY) {
   fal.config({ credentials: FAL_KEY })
 }
 
+/**
+ * Public URL the fal.ai webhook should POST back to.
+ *
+ * Resolution order:
+ *   1. `NEXT_PUBLIC_SITE_URL` — explicit override, what we tell users
+ *      to set in production. Honored as-is so they can point at a
+ *      custom domain or a proxy.
+ *   2. `VERCEL_URL` — auto-set on Vercel deployments (per-deployment
+ *      hostname like `sagasandbox-abc123.vercel.app`, no scheme). This
+ *      fallback means a fresh deploy without env wiring still uses the
+ *      async webhook path instead of accidentally hitting the
+ *      `fal.subscribe()` synchronous path and tripping the 10s/25s
+ *      serverless timeout for a 20s+ flux generation.
+ *   3. `undefined` — interpreted as local dev (loopback).
+ */
+function resolvePublicSiteUrl(): string | undefined {
+  const explicit = process.env.NEXT_PUBLIC_SITE_URL?.trim()
+  if (explicit) return explicit
+  const vercel = process.env.VERCEL_URL?.trim()
+  if (vercel) return vercel.startsWith("http") ? vercel : `https://${vercel}`
+  return undefined
+}
+
 /** True when running against localhost — fal.ai webhooks cannot reach localhost. */
 function isLocalDev(): boolean {
-  if (!SITE_URL) return true
-  return SITE_URL.includes("localhost") || SITE_URL.includes("127.0.0.1")
+  const siteUrl = resolvePublicSiteUrl()
+  if (!siteUrl) return true
+  return siteUrl.includes("localhost") || siteUrl.includes("127.0.0.1")
 }
 
 export interface FalQueueOptions {
@@ -94,7 +117,8 @@ export async function falQueue(
   }
 
   // Production path: async queue with webhook.
-  const webhookUrl = `${SITE_URL}/api/webhooks/fal`
+  const siteUrl = resolvePublicSiteUrl()
+  const webhookUrl = `${siteUrl}/api/webhooks/fal`
   console.log(`[fal] Submitting to queue with webhook: ${webhookUrl}`)
 
   try {
