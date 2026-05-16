@@ -20,6 +20,7 @@ import {
 import type { GeographyCanvasHandle } from "@/components/canvas/GeographyCanvas";
 import { useProjectRealtime } from "@/hooks/useRealtime";
 import type { CanvasOpPayload } from "@/hooks/useRealtime";
+import { useStuckGenerationRecovery } from "@/hooks/useStuckGenerationRecovery";
 import { useUIStore } from "@/store/ui-store";
 import { toastError } from "@/store/toast-store";
 import { History, Settings, Sparkles } from "lucide-react";
@@ -226,6 +227,13 @@ export function WorkspaceClient({
   );
 
   useProjectRealtime(project.id, realtimeHandlers);
+
+  useStuckGenerationRecovery({
+    pins,
+    events,
+    characters,
+    apiAvailable,
+  });
 
   const sidebarContent = useMemo(() => {
     if (panelsBooting) {
