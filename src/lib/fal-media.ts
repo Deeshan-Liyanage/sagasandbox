@@ -1,11 +1,12 @@
 import { fal } from "@fal-ai/client";
 
-if (process.env.FAL_KEY) {
-  fal.config({ credentials: process.env.FAL_KEY });
+const FAL_KEY = process.env.FAL_KEY?.trim();
+if (FAL_KEY) {
+  fal.config({ credentials: FAL_KEY });
 }
 
 export async function falWhisperTranscribe(audioUrl: string): Promise<string | null> {
-  if (!process.env.FAL_KEY) return null;
+  if (!FAL_KEY) return null;
   try {
     const result = await fal.subscribe("fal-ai/whisper", {
       input: { audio_url: audioUrl },
@@ -19,7 +20,7 @@ export async function falWhisperTranscribe(audioUrl: string): Promise<string | n
 }
 
 export async function falDepthMap(imageUrl: string): Promise<string | null> {
-  if (!process.env.FAL_KEY) return null;
+  if (!FAL_KEY) return null;
   try {
     const result = await fal.subscribe("fal-ai/depth-anything", {
       input: { image_url: imageUrl },
@@ -32,12 +33,20 @@ export async function falDepthMap(imageUrl: string): Promise<string | null> {
   }
 }
 
+function resolvePublicSiteUrl(): string | undefined {
+  const explicit = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  if (explicit) return explicit;
+  const vercel = process.env.VERCEL_URL?.trim();
+  if (vercel) return vercel.startsWith("http") ? vercel : `https://${vercel}`;
+  return undefined;
+}
+
 export async function falVideoQueue(options: {
   prompt: string;
   imageUrl?: string;
 }): Promise<{ requestId: string } | null> {
-  if (!process.env.FAL_KEY) return null;
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+  if (!FAL_KEY) return null;
+  const siteUrl = resolvePublicSiteUrl();
   const webhookUrl = siteUrl ? `${siteUrl}/api/webhooks/fal` : undefined;
   const model = "fal-ai/luma-dream-machine";
   const input: Record<string, unknown> = { prompt: options.prompt };

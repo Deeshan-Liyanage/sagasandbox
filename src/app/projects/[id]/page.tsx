@@ -9,7 +9,7 @@ import {
   getMockProject,
 } from "@/lib/mock-workspace"
 import { isSupabaseConfigured } from "@/lib/supabase-env"
-import { createClient } from "@/lib/supabase-server"
+import { createAdminClient } from "@/lib/supabase-admin"
 
 interface ProjectPageProps {
   params: Promise<{ id: string }>
@@ -33,11 +33,7 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
     )
   }
 
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const supabase = createAdminClient()
 
   const { data: project, error: projectError } = await supabase
     .from("projects")
@@ -75,7 +71,7 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
       initialEvents={events ?? []}
       initialCharacters={characters ?? []}
       initialCanvasState={project.canvas_state as Record<string, unknown>}
-      userId={user?.id}
+      apiAvailable={true}
     />
   )
 }

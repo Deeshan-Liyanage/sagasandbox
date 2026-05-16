@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { isAuthError, jsonError, requireAuth } from "@/lib/api-auth";
 import { falQueue, projectStyleConfig } from "@/lib/fal";
+import type { Database } from "@/types/db";
+
+type PinUpdate = Database["public"]["Tables"]["location_pins"]["Update"];
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -56,23 +59,37 @@ export async function POST(request: Request, context: RouteContext) {
     try {
       const result = await falQueue({ prompt, model: "fal-ai/flux/dev" });
       if (result) {
+        const updatePayload: PinUpdate = {
+          gen_status: result.imageUrl ? "done" : "generating",
+          fal_request_id: result.requestId,
+          ...(result.imageUrl ? { generated_image_url: result.imageUrl } : {}),
+        };
         const { data: updated } = await supabase
           .from("location_pins")
-          .update({
-            gen_status: "generating",
-            fal_request_id: result.requestId,
-          })
+          .update(updatePayload)
           .eq("id", pin.id)
           .select()
           .single();
 
         return NextResponse.json({ pin: updated ?? pin }, { status: 201 });
       }
-    } catch {
-      // Return pin without generation if fal fails
+      // falQueue returned null → FAL_KEY not configured. Flip to "error"
+      // so the user gets a Retry button instead of forever-pending.
+      console.error(
+        "[pins POST] falQueue returned null — FAL_KEY likely missing",
+      );
+    } catch (falErr) {
+      console.error("[pins POST] falQueue failed:", falErr);
     }
 
-    return NextResponse.json({ pin }, { status: 201 });
+    const { data: errored } = await supabase
+      .from("location_pins")
+      .update({ gen_status: "error" } satisfies PinUpdate)
+      .eq("id", pin.id)
+      .select()
+      .single();
+
+    return NextResponse.json({ pin: errored ?? pin }, { status: 201 });
   } catch (err) {
     return jsonError(err instanceof Error ? err.message : "Unknown error");
   }

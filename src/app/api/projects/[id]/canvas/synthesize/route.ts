@@ -13,6 +13,9 @@ import type { Json } from "@/types/db";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
+/** Reject oversized data URLs before decode/upload (Vercel body limits). */
+const MAX_SKETCH_DATA_URL_CHARS = 4 * 1024 * 1024;
+
 export async function POST(request: Request, context: RouteContext) {
   const auth = await requireAuth();
   if (isAuthError(auth)) return auth;
@@ -27,6 +30,14 @@ export async function POST(request: Request, context: RouteContext) {
       synthesis_user_notes?: string | null;
       geospatial?: SceneryGeospatialContext;
     };
+
+    const sketchLen = body.sketch_data_url?.length ?? 0;
+    if (sketchLen > MAX_SKETCH_DATA_URL_CHARS) {
+      return NextResponse.json(
+        { error: "Map sketch exceeds maximum upload size (4MB)" },
+        { status: 413 },
+      );
+    }
 
     const { data: project } = await supabase
       .from("projects")

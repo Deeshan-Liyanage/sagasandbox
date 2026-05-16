@@ -6,6 +6,7 @@ import type {
   Character,
   Export,
   LocationPin,
+  Project,
   TimelineEvent,
 } from "@/types/app";
 
@@ -30,6 +31,7 @@ export interface ProjectRealtimeHandlers {
   onCharacterUpdate?: (character: Character) => void;
   onCharacterInsert?: (character: Character) => void;
   onCharacterDelete?: (characterId: string) => void;
+  onProjectUpdate?: (project: Project) => void;
 }
 
 function subscribeTable<T>(
@@ -124,6 +126,18 @@ export function useProjectRealtime(
         filter: `project_id=eq.${projectId}`,
       },
       ({ new: exp }) => handlersRef.current.onExportUpdate(exp as Export),
+    );
+
+    channel.on(
+      "postgres_changes",
+      {
+        event: "UPDATE",
+        schema: "public",
+        table: "projects",
+        filter: `id=eq.${projectId}`,
+      },
+      ({ new: project }) =>
+        handlersRef.current.onProjectUpdate?.(project as Project),
     );
 
     channel.subscribe();

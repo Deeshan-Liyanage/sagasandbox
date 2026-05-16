@@ -1,33 +1,26 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { DEMO_PROJECT_ID } from "@/lib/mock-workspace";
 import { isSupabaseConfigured } from "@/lib/supabase-env";
-import { createClient } from "@/lib/supabase-server";
+import { createAdminClient } from "@/lib/supabase-admin";
+import Link from "next/link";
 
 export default async function HomePage() {
   if (!isSupabaseConfigured()) {
     return <DemoLanding />;
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const supabase = createAdminClient();
 
-  if (!user) {
-    redirect("/login");
-  }
-
-  const demoName = "The Obsidian Covenant";
-  const { data: demo } = await supabase
+  // Redirect to the first available project, or to /projects to create one.
+  const { data: projects } = await supabase
     .from("projects")
-    .select("id")
-    .eq("name", demoName)
-    .maybeSingle();
+    .select("id, name")
+    .order("created_at", { ascending: true })
+    .limit(1);
 
-  if (demo?.id) {
-    redirect(`/projects/${demo.id}`);
+  if (projects && projects.length > 0) {
+    redirect(`/projects/${projects[0].id}`);
   }
 
   redirect("/projects");
@@ -44,9 +37,9 @@ function DemoLanding() {
           Agentic multimodal storytelling canvas
         </h1>
         <p className="text-sm leading-relaxed text-[#9ca3af]">
-          Map geography, sequence events on a timeline, and catalog characters in
-          a collaborative studio workspace. Connect Supabase to persist projects;
-          until then, explore the demo workspace.
+          Map geography, sequence events on a timeline, and catalog characters
+          in a collaborative studio workspace. Connect Supabase to persist
+          projects; until then, explore the demo workspace.
         </p>
         <Link
           href={`/projects/${DEMO_PROJECT_ID}`}
@@ -61,4 +54,3 @@ function DemoLanding() {
     </div>
   );
 }
-
