@@ -100,10 +100,10 @@ function pinColor(status: LocationPin["gen_status"]) {
 
 function toolCursor(
   tool: CanvasTool,
-  spaceHeld: boolean,
+  panModifierHeld: boolean,
   isPanning: boolean,
 ): string {
-  if (isPanning || spaceHeld) return "cursor-grabbing";
+  if (isPanning || panModifierHeld) return "cursor-grabbing";
   if (tool === "eraser") return "cursor-cell";
   if (tool === "scenery") return "cursor-move";
   return "cursor-crosshair";
@@ -111,6 +111,37 @@ function toolCursor(
 
 function isPanButton(button: number) {
   return button === 1 || button === 2;
+}
+
+function shouldStartPan(
+  button: number,
+  modifiers: {
+    space: boolean;
+    alt: boolean;
+    shift: boolean;
+    dblClickWindow: boolean;
+  },
+) {
+  return (
+    modifiers.space ||
+    modifiers.alt ||
+    modifiers.shift ||
+    isPanButton(button) ||
+    modifiers.dblClickWindow
+  );
+}
+
+function pointerClientXY(evt: MouseEvent | TouchEvent) {
+  if ("touches" in evt && evt.touches.length > 0) {
+    return { x: evt.touches[0].clientX, y: evt.touches[0].clientY };
+  }
+  if ("changedTouches" in evt && evt.changedTouches.length > 0) {
+    return {
+      x: evt.changedTouches[0].clientX,
+      y: evt.changedTouches[0].clientY,
+    };
+  }
+  return { x: (evt as MouseEvent).clientX, y: (evt as MouseEvent).clientY };
 }
 
 export const GeographyCanvas = forwardRef<
@@ -154,10 +185,16 @@ export const GeographyCanvas = forwardRef<
     stageY: number;
   } | null>(null);
   const dblClickPanUntilRef = useRef(0);
+  const spaceHeldRef = useRef(false);
+  const altHeldRef = useRef(false);
+  const shiftHeldRef = useRef(false);
+  const panWindowCleanupRef = useRef<(() => void) | null>(null);
 
   const [size, setSize] = useState({ width: 800, height: 600 });
   const [tool, setTool] = useState<CanvasTool>("map");
   const [spaceHeld, setSpaceHeld] = useState(false);
+  /** Drives pin draggable off while Space / Alt / Shift pan modifiers are held. */
+  const [panModifierHeld, setPanModifierHeld] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 });
   const [scale, setScale] = useState(1);
@@ -363,24 +400,9 @@ export const GeographyCanvas = forwardRef<
   }, [sceneryTransform, syncSceneryNodeFromTransform]);
 
   useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.code === "Space" && !e.repeat) {
-        e.preventDefault();
-        setSpaceHeld(true);
-      }
-    };
-    const onKeyUp = (e: KeyboardEvent) => {
-      if (e.code === "Space") {
-        setSpaceHeld(false);
-        setIsPanning(false);
-        panSessionRef.current = null;
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("keyup", onKeyUp);
     return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
+      panWindowCleanupRef.current?.();
+      panWindowCleanupRef.current = null;
     };
   }, []);
 
@@ -597,19 +619,123 @@ export const GeographyCanvas = forwardRef<
     return transform.point(pos);
   }, []);
 
+  const endPanSession = useCallback(() => {
+    panWindowCleanupRef.current?.();
+    panWindowCleanupRef.current = null;
+    panSessionRef.current = null;
+    setIsPanning(false);
+  }, []);
+
   const beginPan = useCallback(
     (clientX: number, clientY: number) => {
+      const stage = stageRef.current;
+      if (!stage || panSessionRef.current) return;
+
+      pointerSessionRef.current = null;
+      setDrawing(false);
+      setErasing(false);
+      setCurrentLineId(null);
+
       panSessionRef.current = {
         startClientX: clientX,
         startClientY: clientY,
-        stageX: stagePos.x,
-        stageY: stagePos.y,
+        stageX: stage.x(),
+        stageY: stage.y(),
       };
       setIsPanning(true);
-      pointerSessionRef.current = null;
+
+      const onWindowMove = (e: MouseEvent | TouchEvent) => {
+        const session = panSessionRef.current;
+        const activeStage = stageRef.current;
+        if (!session || !activeStage) return;
+
+        const { x: cx, y: cy } = pointerClientXY(e);
+        const next = {
+          x: session.stageX + (cx - session.startClientX),
+          y: session.stageY + (cy - session.startClientY),
+        };
+        activeStage.position(next);
+        setStagePos(next);
+        activeStage.batchDraw();
+      };
+
+      const onWindowUp = () => {
+        const activeStage = stageRef.current;
+        if (activeStage && panSessionRef.current) {
+          const pos = activeStage.position();
+          setStagePos({ x: pos.x, y: pos.y });
+          persistCanvas();
+        }
+        endPanSession();
+      };
+
+      window.addEventListener("mousemove", onWindowMove);
+      window.addEventListener("mouseup", onWindowUp);
+      window.addEventListener("touchmove", onWindowMove, { passive: false });
+      window.addEventListener("touchend", onWindowUp);
+      window.addEventListener("touchcancel", onWindowUp);
+      panWindowCleanupRef.current = () => {
+        window.removeEventListener("mousemove", onWindowMove);
+        window.removeEventListener("mouseup", onWindowUp);
+        window.removeEventListener("touchmove", onWindowMove);
+        window.removeEventListener("touchend", onWindowUp);
+        window.removeEventListener("touchcancel", onWindowUp);
+      };
     },
-    [stagePos.x, stagePos.y],
+    [endPanSession, persistCanvas],
   );
+
+  const syncPanModifierHeld = useCallback(() => {
+    setPanModifierHeld(
+      spaceHeldRef.current || altHeldRef.current || shiftHeldRef.current,
+    );
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code === "Space" && !e.repeat) {
+        if (
+          containerRef.current?.contains(document.activeElement) ||
+          document.activeElement === document.body
+        ) {
+          e.preventDefault();
+        }
+        spaceHeldRef.current = true;
+        setSpaceHeld(true);
+        syncPanModifierHeld();
+      }
+      if (e.key === "Alt") {
+        altHeldRef.current = true;
+        syncPanModifierHeld();
+      }
+      if (e.key === "Shift") {
+        shiftHeldRef.current = true;
+        syncPanModifierHeld();
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "Space") {
+        spaceHeldRef.current = false;
+        setSpaceHeld(false);
+        syncPanModifierHeld();
+        endPanSession();
+      }
+      if (e.key === "Alt") {
+        altHeldRef.current = false;
+        syncPanModifierHeld();
+      }
+      if (e.key === "Shift") {
+        shiftHeldRef.current = false;
+        syncPanModifierHeld();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, [endPanSession, syncPanModifierHeld]);
 
   const eraseAtPoint = useCallback(
     (point: { x: number; y: number }) => {
@@ -635,8 +761,6 @@ export const GeographyCanvas = forwardRef<
 
   const handlePointerDown = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
-      if (tool === "scenery") return;
-
       const evt = e.evt;
       const clientX =
         "clientX" in evt ? evt.clientX : evt.touches[0]?.clientX ?? 0;
@@ -644,15 +768,23 @@ export const GeographyCanvas = forwardRef<
         "clientY" in evt ? evt.clientY : evt.touches[0]?.clientY ?? 0;
       const button = "button" in evt ? evt.button : 0;
 
-      const panGesture =
-        spaceHeld ||
-        isPanButton(button) ||
-        Date.now() < dblClickPanUntilRef.current;
+      if (isPanButton(button)) {
+        evt.preventDefault();
+      }
 
-      if (panGesture && tool === "map") {
+      const panGesture = shouldStartPan(button, {
+        space: spaceHeldRef.current,
+        alt: altHeldRef.current,
+        shift: shiftHeldRef.current,
+        dblClickWindow: Date.now() < dblClickPanUntilRef.current,
+      });
+
+      if (panGesture) {
         beginPan(clientX, clientY);
         return;
       }
+
+      if (tool === "scenery") return;
 
       const point = getStagePoint();
       if (!point) return;
@@ -673,7 +805,7 @@ export const GeographyCanvas = forwardRef<
         setDrawExceededThreshold(false);
       }
     },
-    [tool, spaceHeld, getStagePoint, eraseAtPoint, beginPan],
+    [tool, getStagePoint, eraseAtPoint, beginPan],
   );
 
   const broadcastCursor = useCallback(
@@ -699,15 +831,7 @@ export const GeographyCanvas = forwardRef<
       const clientY =
         "clientY" in evt ? evt.clientY : evt.touches[0]?.clientY ?? 0;
 
-      if (isPanning && panSessionRef.current) {
-        const dx = clientX - panSessionRef.current.startClientX;
-        const dy = clientY - panSessionRef.current.startClientY;
-        const next = {
-          x: panSessionRef.current.stageX + dx,
-          y: panSessionRef.current.stageY + dy,
-        };
-        setStagePos(next);
-        stageRef.current?.position(next);
+      if (panSessionRef.current) {
         return;
       }
 
@@ -753,23 +877,12 @@ export const GeographyCanvas = forwardRef<
 
       broadcastCursor(point);
     },
-    [
-      isPanning,
-      tool,
-      drawing,
-      currentLineId,
-      getStagePoint,
-      eraseAtPoint,
-      broadcastCursor,
-    ],
+    [tool, drawing, currentLineId, getStagePoint, eraseAtPoint, broadcastCursor],
   );
 
   const handlePointerUp = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
-      if (isPanning) {
-        setIsPanning(false);
-        panSessionRef.current = null;
-        persistCanvas();
+      if (panSessionRef.current) {
         return;
       }
 
@@ -811,7 +924,6 @@ export const GeographyCanvas = forwardRef<
       setDrawExceededThreshold(false);
     },
     [
-      isPanning,
       drawing,
       erasing,
       tool,
@@ -1029,7 +1141,9 @@ export const GeographyCanvas = forwardRef<
   return (
     <div
       ref={containerRef}
-      className="relative h-full w-full overflow-hidden bg-[#0e0e0f]"
+      tabIndex={0}
+      className="relative h-full w-full overflow-hidden bg-[#0e0e0f] outline-none"
+      onPointerDown={() => containerRef.current?.focus({ preventScroll: true })}
     >
       {loading ? (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#0e0e0f]/80">
@@ -1053,8 +1167,8 @@ export const GeographyCanvas = forwardRef<
       ) : null}
       {tool === "map" ? (
         <p className="pointer-events-none absolute inset-x-4 bottom-20 z-[2] text-center text-[10px] text-[#6b7280]">
-          Drag to draw · Click empty map to add pin · Space / middle / right
-          drag to pan · Double-click then drag to pan
+          Drag to draw · Click empty map to add pin · Hold Space, Alt, or Shift
+          and drag to pan · Middle / right mouse drag to pan
         </p>
       ) : null}
       {toolbar}
@@ -1082,7 +1196,7 @@ export const GeographyCanvas = forwardRef<
         onTouchEnd={handlePointerUp}
         onDblClick={handleStageDblClick}
         onContextMenu={(e) => e.evt.preventDefault()}
-        className={toolCursor(tool, spaceHeld, isPanning)}
+        className={toolCursor(tool, panModifierHeld, isPanning)}
       >
         <Layer>
           {hasSceneryImage && sceneryTransform ? (
@@ -1167,7 +1281,9 @@ export const GeographyCanvas = forwardRef<
               key={pin.id}
               x={pin.canvas_x}
               y={pin.canvas_y}
-              draggable={tool === "map" && apiAvailable}
+              draggable={
+                tool === "map" && apiAvailable && !panModifierHeld
+              }
               onDragStart={(e) => {
                 e.cancelBubble = true;
                 pointerSessionRef.current = null;
