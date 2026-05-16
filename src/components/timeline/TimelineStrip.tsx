@@ -163,6 +163,11 @@ export function TimelineStrip({
 
   return (
     <div className="flex h-full flex-col">
+      {!apiAvailable ? (
+        <p className="px-4 pt-2 text-xs text-[#9ca3af]">
+          {PROJECT_API_UNAVAILABLE_MESSAGE}
+        </p>
+      ) : null}
       {error ? (
         <p className="px-4 pt-2 text-xs text-[#ef4444]">{error}</p>
       ) : null}
@@ -191,7 +196,8 @@ export function TimelineStrip({
             <button
               type="button"
               onClick={() => setShowAdd((v) => !v)}
-              className="flex h-[88px] w-10 shrink-0 items-center justify-center rounded-lg border border-dashed border-[#2a2a2e] text-[#9ca3af] hover:border-[#7c3aed] hover:text-white"
+              disabled={!apiAvailable}
+              className="flex h-[88px] w-10 shrink-0 items-center justify-center rounded-lg border border-dashed border-[#2a2a2e] text-[#9ca3af] hover:border-[#7c3aed] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
               aria-label="Add event"
             >
               <Plus className="h-5 w-5" />
@@ -207,23 +213,26 @@ export function TimelineStrip({
         >
           <input
             required
+            disabled={!apiAvailable}
             placeholder="Event title"
             value={form.title}
             onChange={(e) => setForm({ ...form, title: e.target.value })}
-            className="min-w-[120px] flex-1 rounded border border-[#2a2a2e] bg-[#0e0e0f] px-2 py-1 text-xs text-white"
+            className="min-w-[120px] flex-1 rounded border border-[#2a2a2e] bg-[#0e0e0f] px-2 py-1 text-xs text-white disabled:opacity-50"
           />
           <input
             placeholder="Description"
+            disabled={!apiAvailable}
             value={form.description}
             onChange={(e) =>
               setForm({ ...form, description: e.target.value })
             }
-            className="min-w-[160px] flex-[2] rounded border border-[#2a2a2e] bg-[#0e0e0f] px-2 py-1 text-xs text-white"
+            className="min-w-[160px] flex-[2] rounded border border-[#2a2a2e] bg-[#0e0e0f] px-2 py-1 text-xs text-white disabled:opacity-50"
           />
           <select
+            disabled={!apiAvailable}
             value={form.pin_id}
             onChange={(e) => setForm({ ...form, pin_id: e.target.value })}
-            className="rounded border border-[#2a2a2e] bg-[#0e0e0f] px-2 py-1 text-xs text-white"
+            className="rounded border border-[#2a2a2e] bg-[#0e0e0f] px-2 py-1 text-xs text-white disabled:opacity-50"
           >
             <option value="">No pin</option>
             {pins.map((p) => (
@@ -234,7 +243,8 @@ export function TimelineStrip({
           </select>
           <button
             type="submit"
-            className="rounded bg-[#7c3aed] px-3 py-1 text-xs font-medium text-white"
+            disabled={!apiAvailable}
+            className="rounded bg-[#7c3aed] px-3 py-1 text-xs font-medium text-white disabled:opacity-50"
           >
             Add
           </button>

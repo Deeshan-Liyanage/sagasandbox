@@ -85,14 +85,16 @@ export const GeographyCanvas = forwardRef<
     (op: CanvasOpPayload) => {
       if (op.user_id === userId) return;
 
-      const points = op.payload.points;
-      if (!Array.isArray(points) || points.some((n) => typeof n !== "number")) {
-        return;
-      }
-
       switch (op.op) {
         case "add":
-        case "modify":
+        case "modify": {
+          const points = op.payload.points;
+          if (
+            !Array.isArray(points) ||
+            points.some((n) => typeof n !== "number")
+          ) {
+            return;
+          }
           setLines((prev) => {
             const idx = prev.findIndex((l) => l.id === op.object_id);
             if (idx === -1) {
@@ -105,6 +107,7 @@ export const GeographyCanvas = forwardRef<
             );
           });
           break;
+        }
         case "delete":
           setLines((prev) => prev.filter((l) => l.id !== op.object_id));
           break;

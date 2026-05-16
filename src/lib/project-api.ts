@@ -1,11 +1,14 @@
+import { DEMO_PROJECT_ID } from "@/lib/mock-workspace";
 import { isSupabaseConfigured } from "@/lib/supabase-env";
 
 export const PROJECT_API_UNAVAILABLE_MESSAGE =
   "Connect Supabase and sign in to save changes to this project.";
 
 /** True when REST project routes are expected to be available. */
-export function isProjectApiAvailable(): boolean {
-  return isSupabaseConfigured();
+export function isProjectApiAvailable(projectId?: string): boolean {
+  if (!isSupabaseConfigured()) return false;
+  if (projectId === DEMO_PROJECT_ID) return false;
+  return true;
 }
 
 export async function readApiError(

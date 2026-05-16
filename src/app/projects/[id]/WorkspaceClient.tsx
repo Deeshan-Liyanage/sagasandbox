@@ -70,7 +70,7 @@ export function WorkspaceClient({
 
   const canvasRef = useRef<GeographyCanvasHandle>(null);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const apiAvailable = isProjectApiAvailable();
+  const apiAvailable = isProjectApiAvailable(project.id);
 
   const {
     selectedPin,
