@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { isAuthError, jsonError, requireAuth } from "@/lib/api-auth";
 import { falQueue, projectStyleConfig } from "@/lib/fal";
 import type { VisualTraits } from "@/types/app";
+import type { Database } from "@/types/db";
+
+type CharacterUpdate = Database["public"]["Tables"]["characters"]["Update"];
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -79,13 +82,11 @@ export async function POST(request: Request, context: RouteContext) {
         imageUrl: character.reference_image_url ?? undefined,
       });
       if (result) {
-        const updatePayload: Record<string, string> = {
+        const updatePayload: CharacterUpdate = {
           gen_status: result.imageUrl ? "done" : "generating",
           fal_request_id: result.requestId,
+          ...(result.imageUrl ? { generated_portrait_url: result.imageUrl } : {}),
         };
-        if (result.imageUrl) {
-          updatePayload.generated_portrait_url = result.imageUrl;
-        }
         const { data: updated } = await supabase
           .from("characters")
           .update(updatePayload)

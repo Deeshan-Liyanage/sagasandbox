@@ -59,13 +59,11 @@ export async function PATCH(request: Request, context: RouteContext) {
         try {
           const result = await falQueue({ prompt, model: "fal-ai/flux/dev" });
           if (result) {
-            const updatePayload: Record<string, string> = {
+            const updatePayload: PinUpdate = {
               gen_status: result.imageUrl ? "done" : "generating",
               fal_request_id: result.requestId,
+              ...(result.imageUrl ? { generated_image_url: result.imageUrl } : {}),
             };
-            if (result.imageUrl) {
-              updatePayload.generated_image_url = result.imageUrl;
-            }
             const { data: updated } = await supabase
               .from("location_pins")
               .update(updatePayload)

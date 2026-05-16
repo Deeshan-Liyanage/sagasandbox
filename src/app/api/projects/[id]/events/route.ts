@@ -5,6 +5,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/db";
 import type { VisualTraits } from "@/types/app";
 
+type EventUpdate = Database["public"]["Tables"]["timeline_events"]["Update"];
+
 type RouteContext = { params: Promise<{ id: string }> };
 
 async function triggerEventGeneration(
@@ -67,13 +69,11 @@ async function triggerEventGeneration(
   });
 
   if (result) {
-    const updatePayload: Record<string, string> = {
+    const updatePayload: EventUpdate = {
       gen_status: result.imageUrl ? "done" : "generating",
       fal_request_id: result.requestId,
+      ...(result.imageUrl ? { generated_image_url: result.imageUrl } : {}),
     };
-    if (result.imageUrl) {
-      updatePayload.generated_image_url = result.imageUrl;
-    }
     await supabase
       .from("timeline_events")
       .update(updatePayload)
