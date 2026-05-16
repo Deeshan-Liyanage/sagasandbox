@@ -1,0 +1,88 @@
+---
+description: Agents commit at milestones using Conventional Commits (no user prompt required)
+alwaysApply: true
+---
+
+# Agent milestone commits
+
+**Project policy:** Agents working in this repo **must commit at milestones** while executing. Do not wait for the user to ask. This overrides generic “only commit when requested” guidance for this repository.
+
+Pair with [Branch-Naming.mdc](Branch-Naming.mdc): never commit on `main`; use a feature branch whose `type` matches the work.
+
+## When to commit (milestones)
+
+Commit when **all** of the following are true:
+
+1. There is a **coherent, reviewable unit** of change (one intent: a feature slice, bug fix, refactor, test, or docs update).
+2. The unit is **complete enough to describe** in one Conventional Commit subject (builds; avoid half-finished refactors split across meaningless commits).
+3. You are at a **natural boundary**, such as:
+   - Finishing a user-requested sub-task or todo item
+   - Completing one component, API route, migration, or test file group for the current goal
+   - Before switching to an unrelated area (e.g. canvas → copilot)
+   - Before ending a turn when meaningful uncommitted work would otherwise be left behind
+   - After fixing CI or lint for the change you just made
+
+**Do not** commit on every single edit, nor leave large unrelated diffs uncommitted across many milestones.
+
+## When not to commit
+
+- No file changes, or only accidental/format noise unrelated to the task
+- Files that may contain secrets (`.env`, keys, credentials) — never stage these
+- The tree is knowingly broken and you have not yet attempted a minimal fix (fix first, then commit)
+- The user explicitly asked **not** to commit yet in this thread
+
+## Conventional Commits format
+
+Follow [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+<type>[optional scope]: <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+| Field | Rules |
+|-------|--------|
+| `type` | Required. Same set as branches: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore` |
+| `scope` | Optional. Prefer project areas: `canvas`, `timeline`, `vault`, `copilot`, `export`, `api`, `db`, `ui` |
+| `description` | Imperative, lowercase, no trailing period, ≤72 chars |
+| `body` | Why/context when the diff is non-obvious |
+| `footer` | `BREAKING CHANGE:` or `Refs #123` when applicable |
+
+Examples:
+
+```
+feat(timeline): add ghost nodes for copilot suggestions
+fix(canvas): sync pin highlight with selected event
+refactor(vault): extract character card into shared component
+```
+
+Use **`feat`** for user-visible capability, **`fix`** for bugs, **`chore`** for tooling/deps only when no user-facing change.
+
+## Commit workflow (each milestone)
+
+1. Confirm you are **not on `main`** (create or checkout a branch per Branch-Naming if needed).
+2. Run `git status` and `git diff` (staged and unstaged).
+3. Stage only files that belong to this milestone.
+4. Write the message from the **dominant intent** of this milestone (match branch `type` when possible).
+5. Commit (PowerShell example):
+
+```powershell
+git add <paths>
+git commit -m "feat(timeline): add ghost nodes for copilot suggestions" -m "Stage pending nodes at 50% opacity until approved."
+```
+
+6. Run `git status` to verify a clean commit (or only intentional leftovers).
+
+## Git safety
+
+- Never change git config, force-push `main`, or use `--no-verify` unless the user explicitly requests it
+- Never `git commit --amend` unless the user asked, the last commit was yours this session, and it was not pushed
+- Do **not** push unless the user asked to push or open a PR
+- If a pre-commit hook fails, fix the issue and create a **new** commit (do not amend a failed commit)
+
+## Multi-milestone tasks
+
+For larger requests, plan **several milestone commits** (e.g. types → UI → API → tests), each with its own conventional message, instead of one giant commit at the end.
