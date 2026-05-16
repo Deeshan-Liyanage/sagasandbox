@@ -20,6 +20,7 @@ import {
 import type { GeographyCanvasHandle } from "@/components/canvas/GeographyCanvas";
 import { useProjectRealtime } from "@/hooks/useRealtime";
 import type { CanvasOpPayload } from "@/hooks/useRealtime";
+import { useStuckGenerationRecovery } from "@/hooks/useStuckGenerationRecovery";
 import { useWorkspacePanes } from "@/hooks/useWorkspacePanes";
 import { useUIStore } from "@/store/ui-store";
 import { toastError } from "@/store/toast-store";
@@ -240,6 +241,12 @@ export function WorkspaceClient({
 
   useProjectRealtime(project.id, realtimeHandlers);
 
+  useStuckGenerationRecovery({
+    pins,
+    events,
+    characters,
+    apiAvailable,
+  });
 
   const vaultPane = useMemo(() => {
     if (panelsBooting) {
