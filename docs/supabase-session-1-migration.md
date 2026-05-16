@@ -4,6 +4,8 @@
 **Project ref:** `icxtuezwlivhjzjbqxnk`  
 **Status:** Remote schema applied. Agent B committed repo types, fal helper, edge functions (deployed), and B4 exports bucket migration.
 
+**Vercel integration (managing agent):** [vercel-supabase-orchestrator.md](./integrations/vercel-supabase-orchestrator.md)
+
 ## Migrations applied (remote only)
 
 | Name | Contents |
