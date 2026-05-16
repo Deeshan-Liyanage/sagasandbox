@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 
 import {
+  devBypassRequiresKey,
   getDevBypassEmail,
   isDevBypassEnabled,
+  isDevBypassSecretValid,
 } from "@/lib/auth-config";
 import { createAdminClient } from "@/lib/supabase-admin";
 import { isSupabaseConfigured } from "@/lib/supabase-env";
@@ -10,7 +12,7 @@ import { isSupabaseConfigured } from "@/lib/supabase-env";
 /**
  * Instantly signs in a fixed dev user via admin magic link (no email sent).
  * Enable with AUTH_DEV_BYPASS_ENABLED=true + AUTH_DEV_BYPASS_SECRET in .env.local.
- * On production, also requires ?key=<AUTH_DEV_BYPASS_SECRET> unless disabled entirely.
+ * Preview and production require the secret; local `npm run dev` does not.
  */
 export async function GET(request: Request) {
   if (!isSupabaseConfigured()) {
@@ -28,19 +30,8 @@ export async function GET(request: Request) {
   const next = url.searchParams.get("next") ?? "/projects";
   const providedKey = url.searchParams.get("key");
 
-  const isProduction =
-    process.env.NODE_ENV === "production" ||
-    process.env.VERCEL_ENV === "production";
-
-  if (isProduction) {
-    if (providedKey !== process.env.AUTH_DEV_BYPASS_SECRET) {
-      return NextResponse.json({ error: "Invalid dev bypass key" }, { status: 403 });
-    }
-  } else if (process.env.NODE_ENV !== "development") {
-    // Preview / staging: require explicit key
-    if (providedKey !== process.env.AUTH_DEV_BYPASS_SECRET) {
-      return NextResponse.json({ error: "Invalid dev bypass key" }, { status: 403 });
-    }
+  if (devBypassRequiresKey() && !isDevBypassSecretValid(providedKey)) {
+    return NextResponse.json({ error: "Invalid dev bypass key" }, { status: 403 });
   }
 
   const origin = url.origin;

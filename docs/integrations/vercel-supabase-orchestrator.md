@@ -43,6 +43,10 @@ Copy from `.env.example`. Map each variable to **where** it must exist.
 | `NEXT_PUBLIC_SITE_URL` | ✅ (preview URL) | ✅ (prod domain) | — | `http://localhost:3000` |
 | `FAL_KEY` | ✅ | ✅ | ✅ (image gen + Kokoro TTS) | ✅ |
 | `OPENAI_API_KEY` | ✅ | ✅ | — | ✅ |
+| `AUTH_DEV_BYPASS_ENABLED` | optional (`true` for QA) | ❌ (unless explicit) | — | optional (`true`) |
+| `AUTH_DEV_BYPASS_SECRET` | ✅ if bypass enabled | only if `ALLOW_PRODUCTION` | — | ✅ if bypass enabled |
+| `AUTH_DEV_BYPASS_ALLOW_PRODUCTION` | ❌ | ❌ default | — | ❌ |
+| `DEV_BYPASS_EMAIL` | optional | optional | — | optional |
 
 **Rules for the orchestrator:**
 
