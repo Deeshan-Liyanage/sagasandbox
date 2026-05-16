@@ -14,12 +14,24 @@ export interface ParsedCanvasState {
   viewport: ParsedCanvasViewport;
 }
 
+export interface SceneryTransform {
+  x: number;
+  y: number;
+  /** Reference width (typically natural image width). */
+  width: number;
+  /** Reference height (typically natural image height). */
+  height: number;
+  scaleX: number;
+  scaleY: number;
+}
+
 export interface CanvasMeta {
   scenery_preview_url?: string | null;
   depth_preview_url?: string | null;
   scenery_fal_request_id?: string | null;
   scenery_fal_model?: string | null;
   last_synthesis_at?: string | null;
+  scenery_transform?: SceneryTransform | null;
 }
 
 const META_KEYS: (keyof CanvasMeta)[] = [
@@ -28,6 +40,7 @@ const META_KEYS: (keyof CanvasMeta)[] = [
   "scenery_fal_request_id",
   "scenery_fal_model",
   "last_synthesis_at",
+  "scenery_transform",
 ];
 
 type KonvaNode = {
@@ -44,14 +57,60 @@ function isKonvaStage(value: unknown): value is KonvaNode {
   );
 }
 
+function isSceneryTransform(value: unknown): value is SceneryTransform {
+  if (!value || typeof value !== "object") return false;
+  const t = value as SceneryTransform;
+  return (
+    typeof t.x === "number" &&
+    typeof t.y === "number" &&
+    typeof t.width === "number" &&
+    typeof t.height === "number" &&
+    typeof t.scaleX === "number" &&
+    typeof t.scaleY === "number"
+  );
+}
+
 function pickMeta(source: Record<string, unknown>): CanvasMeta {
   const meta: CanvasMeta = {};
   for (const key of META_KEYS) {
     if (key in source) {
-      meta[key] = source[key] as CanvasMeta[typeof key];
+      const value = source[key];
+      if (key === "scenery_transform") {
+        meta.scenery_transform = isSceneryTransform(value) ? value : null;
+      } else {
+        meta[key] = value as CanvasMeta[typeof key];
+      }
     }
   }
   return meta;
+}
+
+export function defaultSceneryTransform(
+  stageWidth: number,
+  stageHeight: number,
+  imageWidth: number,
+  imageHeight: number,
+): SceneryTransform {
+  if (imageWidth <= 0 || imageHeight <= 0) {
+    return {
+      x: 0,
+      y: 0,
+      width: Math.max(stageWidth, 1),
+      height: Math.max(stageHeight, 1),
+      scaleX: 1,
+      scaleY: 1,
+    };
+  }
+  const fitScale =
+    Math.min(stageWidth / imageWidth, stageHeight / imageHeight) * 0.9;
+  return {
+    x: (stageWidth - imageWidth * fitScale) / 2,
+    y: (stageHeight - imageHeight * fitScale) / 2,
+    width: imageWidth,
+    height: imageHeight,
+    scaleX: fitScale,
+    scaleY: fitScale,
+  };
 }
 
 /** Read synthesis metadata from persisted canvas_state (wrapper or legacy top-level). */
@@ -86,12 +145,24 @@ export function buildCanvasState(
   return { stage, meta };
 }
 
+function isWrappedCanvasState(value: Record<string, unknown>): boolean {
+  return isKonvaStage(value.stage);
+}
+
 /** Preserve synthesis metadata when persisting Konva stage JSON from the client. */
 export function mergeCanvasStateForPersist(
   existing: Record<string, unknown> | null | undefined,
-  newStage: Record<string, unknown>,
+  incoming: Record<string, unknown>,
 ): Record<string, unknown> {
-  return buildCanvasState(newStage, extractCanvasMeta(existing));
+  if (isWrappedCanvasState(incoming)) {
+    const stage = incoming.stage as Record<string, unknown>;
+    const meta = {
+      ...extractCanvasMeta(existing),
+      ...extractCanvasMeta(incoming),
+    };
+    return buildCanvasState(stage, meta);
+  }
+  return buildCanvasState(incoming, extractCanvasMeta(existing));
 }
 
 /** Apply metadata patches while keeping the Konva stage subtree intact. */

@@ -11,7 +11,17 @@ import {
   type Dispatch,
   type SetStateAction,
 } from "react";
-import { Stage, Layer, Line, Circle, Text, Group } from "react-konva";
+import {
+  Stage,
+  Layer,
+  Line,
+  Circle,
+  Text,
+  Group,
+  Image as KonvaImage,
+  Rect,
+  Transformer,
+} from "react-konva";
 import type Konva from "konva";
 import type { LocationPin } from "@/types/app";
 import { GEN_STATUS_COLORS } from "@/lib/constants";
@@ -19,7 +29,15 @@ import {
   broadcastCanvasOp,
   type CanvasOpPayload,
 } from "@/hooks/useRealtime";
-import { extractCanvasMeta, parseKonvaCanvasState } from "@/lib/canvas-state";
+import {
+  buildCanvasState,
+  defaultSceneryTransform,
+  extractCanvasMeta,
+  parseKonvaCanvasState,
+  type CanvasMeta,
+  type SceneryTransform,
+} from "@/lib/canvas-state";
+import { findLinesNearPoint } from "@/lib/canvas-eraser";
 import {
   isSceneryPreviewResolved,
   SCENERY_ERROR,
@@ -31,7 +49,7 @@ import { exportMapSketchToDataUrl } from "@/lib/canvas-sketch-export";
 import { toastError, toastSuccess } from "@/store/toast-store";
 import { PinCreator } from "./PinCreator";
 
-export type CanvasTool = "brush" | "pan";
+export type CanvasTool = "brush" | "pan" | "eraser" | "scenery";
 
 export interface GeographyCanvasProps {
   projectId: string;
@@ -61,6 +79,8 @@ const MIN_SCALE = 0.1;
 const MAX_SCALE = 5;
 const CURSOR_STALE_MS = 4000;
 const CURSOR_BROADCAST_MS = 80;
+const ERASER_RADIUS_BASE = 20;
+const SCENERY_OPACITY = 0.55;
 
 interface PeerCursor {
   x: number;
@@ -70,6 +90,19 @@ interface PeerCursor {
 
 function pinColor(status: LocationPin["gen_status"]) {
   return GEN_STATUS_COLORS[status] ?? "#F59E0B";
+}
+
+function toolCursor(tool: CanvasTool): string {
+  switch (tool) {
+    case "pan":
+      return "cursor-grab";
+    case "eraser":
+      return "cursor-cell";
+    case "scenery":
+      return "cursor-move";
+    default:
+      return "cursor-crosshair";
+  }
 }
 
 export const GeographyCanvas = forwardRef<
@@ -93,9 +126,14 @@ export const GeographyCanvas = forwardRef<
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
+  const sceneryGroupRef = useRef<Konva.Group>(null);
+  const sceneryTransformerRef = useRef<Konva.Transformer>(null);
+  const canvasMetaRef = useRef<CanvasMeta>({});
   const cursorThrottleRef = useRef(0);
   const hydratedStateKeyRef = useRef<string | null>(null);
   const sceneryPendingStartedRef = useRef<number | null>(null);
+  const lastSceneryUrlRef = useRef<string | null>(null);
+
   const [size, setSize] = useState({ width: 800, height: 600 });
   const [tool, setTool] = useState<CanvasTool>("brush");
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 });
@@ -105,6 +143,7 @@ export const GeographyCanvas = forwardRef<
     {},
   );
   const [drawing, setDrawing] = useState(false);
+  const [erasing, setErasing] = useState(false);
   const [currentLineId, setCurrentLineId] = useState<string | null>(null);
   const [pinCreator, setPinCreator] = useState<{
     x: number;
@@ -115,10 +154,49 @@ export const GeographyCanvas = forwardRef<
     null,
   );
   const [depthPreviewUrl, setDepthPreviewUrl] = useState<string | null>(null);
+  const [sceneryImage, setSceneryImage] = useState<HTMLImageElement | null>(
+    null,
+  );
+  const [sceneryTransform, setSceneryTransform] =
+    useState<SceneryTransform | null>(null);
+
+  const sceneryImageUrl = isSceneryPreviewResolved(sceneryPreviewUrl)
+    ? sceneryPreviewUrl
+    : null;
+  const hasSceneryImage = Boolean(sceneryImage && sceneryTransform);
+
+  const persistCanvas = useCallback(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    onCanvasChange(
+      buildCanvasState(
+        JSON.parse(stage.toJSON()) as Record<string, unknown>,
+        canvasMetaRef.current,
+      ) as object,
+    );
+  }, [onCanvasChange]);
+
+  const applySceneryTransform = useCallback(
+    (transform: SceneryTransform) => {
+      setSceneryTransform(transform);
+      canvasMetaRef.current = {
+        ...canvasMetaRef.current,
+        scenery_transform: transform,
+      };
+      persistCanvas();
+    },
+    [persistCanvas],
+  );
 
   const hydrateFromState = useCallback(
     (state: Record<string, unknown> | null | undefined) => {
       const parsed = parseKonvaCanvasState(state);
+      const meta = extractCanvasMeta(state);
+      canvasMetaRef.current = meta;
+      setSceneryPreviewUrl(meta.scenery_preview_url ?? null);
+      setDepthPreviewUrl(meta.depth_preview_url ?? null);
+      setSceneryTransform(meta.scenery_transform ?? null);
+
       if (!parsed) {
         onHydrated?.();
         return;
@@ -189,10 +267,49 @@ export const GeographyCanvas = forwardRef<
     if (hydratedStateKeyRef.current === stateKey) return;
     hydratedStateKeyRef.current = stateKey;
     hydrateFromState(initialCanvasState);
-    const meta = extractCanvasMeta(initialCanvasState);
-    setSceneryPreviewUrl(meta.scenery_preview_url ?? null);
-    setDepthPreviewUrl(meta.depth_preview_url ?? null);
   }, [initialCanvasState, hydrateFromState]);
+
+  useEffect(() => {
+    if (!sceneryImageUrl) {
+      setSceneryImage(null);
+      lastSceneryUrlRef.current = null;
+      return;
+    }
+
+    const urlChanged = sceneryImageUrl !== lastSceneryUrlRef.current;
+    lastSceneryUrlRef.current = sceneryImageUrl;
+
+    const img = new window.Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      setSceneryImage(img);
+      if (urlChanged || !canvasMetaRef.current.scenery_transform) {
+        const next = defaultSceneryTransform(
+          size.width,
+          size.height,
+          img.naturalWidth,
+          img.naturalHeight,
+        );
+        setSceneryTransform(next);
+        canvasMetaRef.current = {
+          ...canvasMetaRef.current,
+          scenery_transform: next,
+        };
+      }
+    };
+    img.onerror = () => setSceneryImage(null);
+    img.src = sceneryImageUrl;
+  }, [sceneryImageUrl, size.width, size.height]);
+
+  useEffect(() => {
+    if (tool !== "scenery" || !sceneryGroupRef.current || !sceneryTransformerRef.current) {
+      sceneryTransformerRef.current?.nodes([]);
+      sceneryTransformerRef.current?.getLayer()?.batchDraw();
+      return;
+    }
+    sceneryTransformerRef.current.nodes([sceneryGroupRef.current]);
+    sceneryTransformerRef.current.getLayer()?.batchDraw();
+  }, [tool, hasSceneryImage, sceneryTransform]);
 
   useEffect(() => {
     if (sceneryPreviewUrl !== SCENERY_PENDING || !apiAvailable) {
@@ -209,9 +326,17 @@ export const GeographyCanvas = forwardRef<
     const applyMeta = (meta: {
       scenery_preview_url?: string | null;
       depth_preview_url?: string | null;
+      scenery_transform?: SceneryTransform | null;
     }) => {
       if (meta.depth_preview_url) {
         setDepthPreviewUrl(meta.depth_preview_url);
+      }
+      if (meta.scenery_transform) {
+        setSceneryTransform(meta.scenery_transform);
+        canvasMetaRef.current = {
+          ...canvasMetaRef.current,
+          scenery_transform: meta.scenery_transform,
+        };
       }
       if (isSceneryPreviewResolved(meta.scenery_preview_url)) {
         setSceneryPreviewUrl(meta.scenery_preview_url!);
@@ -255,6 +380,7 @@ export const GeographyCanvas = forwardRef<
           canvas_meta?: {
             scenery_preview_url?: string | null;
             depth_preview_url?: string | null;
+            scenery_transform?: SceneryTransform | null;
           };
         };
 
@@ -310,43 +436,41 @@ export const GeographyCanvas = forwardRef<
     return () => ro.disconnect();
   }, []);
 
-  const persistCanvas = useCallback(() => {
-    const stage = stageRef.current;
-    if (!stage) return;
-    onCanvasChange(JSON.parse(stage.toJSON()) as object);
-  }, [onCanvasChange]);
+  const handleWheel = useCallback(
+    (e: Konva.KonvaEventObject<WheelEvent>) => {
+      if (tool === "scenery") return;
+      e.evt.preventDefault();
+      const stage = stageRef.current;
+      if (!stage) return;
 
-  const handleWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
-    e.evt.preventDefault();
-    const stage = stageRef.current;
-    if (!stage) return;
+      const oldScale = stage.scaleX();
+      const pointer = stage.getPointerPosition();
+      if (!pointer) return;
 
-    const oldScale = stage.scaleX();
-    const pointer = stage.getPointerPosition();
-    if (!pointer) return;
+      const direction = e.evt.deltaY > 0 ? -1 : 1;
+      const newScale = Math.min(
+        MAX_SCALE,
+        Math.max(MIN_SCALE, oldScale * (1 + direction * 0.08)),
+      );
 
-    const direction = e.evt.deltaY > 0 ? -1 : 1;
-    const newScale = Math.min(
-      MAX_SCALE,
-      Math.max(MIN_SCALE, oldScale * (1 + direction * 0.08)),
-    );
+      const mousePointTo = {
+        x: (pointer.x - stage.x()) / oldScale,
+        y: (pointer.y - stage.y()) / oldScale,
+      };
 
-    const mousePointTo = {
-      x: (pointer.x - stage.x()) / oldScale,
-      y: (pointer.y - stage.y()) / oldScale,
-    };
+      const newPos = {
+        x: pointer.x - mousePointTo.x * newScale,
+        y: pointer.y - mousePointTo.y * newScale,
+      };
 
-    const newPos = {
-      x: pointer.x - mousePointTo.x * newScale,
-      y: pointer.y - mousePointTo.y * newScale,
-    };
-
-    stage.scale({ x: newScale, y: newScale });
-    stage.position(newPos);
-    onCanvasChange(JSON.parse(stage.toJSON()) as object);
-    setScale(newScale);
-    setStagePos(newPos);
-  }, [onCanvasChange]);
+      stage.scale({ x: newScale, y: newScale });
+      stage.position(newPos);
+      setScale(newScale);
+      setStagePos(newPos);
+      persistCanvas();
+    },
+    [tool, persistCanvas],
+  );
 
   const getStagePoint = useCallback(() => {
     const stage = stageRef.current;
@@ -357,8 +481,30 @@ export const GeographyCanvas = forwardRef<
     return transform.point(pos);
   }, []);
 
+  const eraseAtPoint = useCallback(
+    (point: { x: number; y: number }) => {
+      const radius = ERASER_RADIUS_BASE / scale;
+      setLines((prev) => {
+        const hitIds = new Set(
+          findLinesNearPoint(prev, point, radius, (line) => line.id),
+        );
+        if (hitIds.size === 0) return prev;
+        for (const id of hitIds) {
+          void broadcastCanvasOp(projectId, {
+            op: "delete",
+            user_id: userId,
+            object_id: id,
+            payload: {},
+          });
+        }
+        return prev.filter((line) => !hitIds.has(line.id));
+      });
+    },
+    [projectId, scale, userId],
+  );
+
   const handlePointerDown = useCallback(() => {
-    if (tool === "pan") return;
+    if (tool === "pan" || tool === "scenery") return;
     const point = getStagePoint();
     if (!point) return;
 
@@ -367,8 +513,14 @@ export const GeographyCanvas = forwardRef<
       setCurrentLineId(id);
       setDrawing(true);
       setLines((prev) => [...prev, { id, points: [point.x, point.y] }]);
+      return;
     }
-  }, [tool, getStagePoint]);
+
+    if (tool === "eraser") {
+      setErasing(true);
+      eraseAtPoint(point);
+    }
+  }, [tool, getStagePoint, eraseAtPoint]);
 
   const broadcastCursor = useCallback(
     (point: { x: number; y: number }) => {
@@ -399,8 +551,20 @@ export const GeographyCanvas = forwardRef<
       );
     }
 
+    if (erasing && tool === "eraser") {
+      eraseAtPoint(point);
+    }
+
     broadcastCursor(point);
-  }, [drawing, currentLineId, getStagePoint, broadcastCursor]);
+  }, [
+    drawing,
+    erasing,
+    tool,
+    currentLineId,
+    getStagePoint,
+    eraseAtPoint,
+    broadcastCursor,
+  ]);
 
   const handlePointerUp = useCallback(() => {
     if (drawing && currentLineId) {
@@ -415,16 +579,52 @@ export const GeographyCanvas = forwardRef<
       }
       persistCanvas();
     }
+    if (erasing) {
+      persistCanvas();
+    }
     setDrawing(false);
+    setErasing(false);
     setCurrentLineId(null);
   }, [
     drawing,
+    erasing,
     currentLineId,
     lines,
     projectId,
     userId,
     persistCanvas,
   ]);
+
+  const handleSceneryDragEnd = useCallback(
+    (e: Konva.KonvaEventObject<DragEvent>) => {
+      if (!sceneryTransform) return;
+      const node = e.target;
+      applySceneryTransform({
+        ...sceneryTransform,
+        x: node.x(),
+        y: node.y(),
+      });
+    },
+    [sceneryTransform, applySceneryTransform],
+  );
+
+  const handleSceneryTransformEnd = useCallback(() => {
+    const node = sceneryGroupRef.current;
+    if (!node || !sceneryTransform) return;
+
+    const scaleX = node.scaleX();
+    const scaleY = node.scaleY();
+    applySceneryTransform({
+      x: node.x(),
+      y: node.y(),
+      width: Math.max(node.width() * scaleX, 1),
+      height: Math.max(node.height() * scaleY, 1),
+      scaleX: 1,
+      scaleY: 1,
+    });
+    node.scaleX(1);
+    node.scaleY(1);
+  }, [sceneryTransform, applySceneryTransform]);
 
   const handleStageClick = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {
@@ -491,10 +691,7 @@ export const GeographyCanvas = forwardRef<
         error?: string;
         used_sketch_reference?: boolean;
         warnings?: string[];
-        canvas_meta?: {
-          scenery_preview_url?: string | null;
-          depth_preview_url?: string | null;
-        };
+        canvas_meta?: CanvasMeta;
         depth_preview_url?: string | null;
       };
 
@@ -503,6 +700,9 @@ export const GeographyCanvas = forwardRef<
       }
 
       const meta = data.canvas_meta;
+      if (meta) {
+        canvasMetaRef.current = { ...canvasMetaRef.current, ...meta };
+      }
       if (data.queued && meta?.scenery_preview_url === SCENERY_PENDING) {
         setSceneryPreviewUrl(SCENERY_PENDING);
         sceneryPendingStartedRef.current = Date.now();
@@ -541,10 +741,16 @@ export const GeographyCanvas = forwardRef<
     }
   }, [apiAvailable, synthesizing, projectId, lines, pins]);
 
+  const toolbarTools = useMemo(() => {
+    const base: CanvasTool[] = ["brush", "pan", "eraser"];
+    if (hasSceneryImage) base.push("scenery");
+    return base;
+  }, [hasSceneryImage]);
+
   const toolbar = useMemo(
     () => (
-      <div className="absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 gap-2 rounded-lg border border-[#2a2a2e] bg-[#1a1a1e]/95 p-1 shadow-lg backdrop-blur">
-        {(["brush", "pan"] as CanvasTool[]).map((t) => (
+      <div className="absolute bottom-4 left-1/2 z-10 flex max-w-[95vw] -translate-x-1/2 flex-wrap justify-center gap-2 rounded-lg border border-[#2a2a2e] bg-[#1a1a1e]/95 p-1 shadow-lg backdrop-blur">
+        {toolbarTools.map((t) => (
           <button
             key={t}
             type="button"
@@ -574,32 +780,22 @@ export const GeographyCanvas = forwardRef<
         ) : null}
       </div>
     ),
-    [tool, apiAvailable, synthesizing, handleSynthesizeScenery],
+    [toolbarTools, tool, apiAvailable, synthesizing, handleSynthesizeScenery],
   );
 
   return (
-    <div ref={containerRef} className="relative h-full w-full bg-[#0e0e0f]">
+    <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-[#0e0e0f]">
       {loading ? (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#0e0e0f]/80">
           <div className="h-48 w-full max-w-md animate-pulse rounded-lg bg-[#1a1a1e]" />
         </div>
       ) : null}
-      {isSceneryPreviewResolved(sceneryPreviewUrl) ? (
-        // eslint-disable-next-line @next/next/no-img-element -- Fal preview URL from storage
-        <img
-          src={sceneryPreviewUrl as string}
-          alt="Synthesized scenery preview"
-          className="pointer-events-none absolute inset-0 z-[1] h-full w-full object-cover opacity-45"
-        />
-      ) : null}
-      {depthPreviewUrl &&
-      sceneryPreviewUrl !== SCENERY_PENDING &&
-      !isSceneryPreviewResolved(sceneryPreviewUrl) ? (
+      {depthPreviewUrl && !hasSceneryImage ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={depthPreviewUrl}
           alt="Depth map preview"
-          className="pointer-events-none absolute inset-0 z-[1] h-full w-full object-cover opacity-30 mix-blend-screen"
+          className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover opacity-30 mix-blend-screen"
         />
       ) : null}
       {sceneryPreviewUrl === SCENERY_PENDING ? (
@@ -610,8 +806,8 @@ export const GeographyCanvas = forwardRef<
         </div>
       ) : null}
       {toolbar}
-      {pins.length === 0 && !pinCreator ? (
-        <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-[#9ca3af]">
+      {pins.length === 0 && !pinCreator && tool === "brush" ? (
+        <p className="pointer-events-none absolute inset-0 z-[1] flex items-center justify-center text-sm text-[#9ca3af]">
           Click anywhere to add a location
         </p>
       ) : null}
@@ -640,8 +836,53 @@ export const GeographyCanvas = forwardRef<
             persistCanvas();
           }
         }}
-        className="cursor-crosshair"
+        className={toolCursor(tool)}
       >
+        <Layer>
+          {hasSceneryImage && sceneryTransform ? (
+            <Group
+              ref={sceneryGroupRef}
+              x={sceneryTransform.x}
+              y={sceneryTransform.y}
+              scaleX={sceneryTransform.scaleX}
+              scaleY={sceneryTransform.scaleY}
+              draggable={tool === "scenery"}
+              listening={tool === "scenery"}
+              onDragEnd={handleSceneryDragEnd}
+              onTransformEnd={handleSceneryTransformEnd}
+            >
+              <KonvaImage
+                image={sceneryImage!}
+                width={sceneryTransform.width}
+                height={sceneryTransform.height}
+                opacity={SCENERY_OPACITY}
+              />
+              {tool === "scenery" ? (
+                <Rect
+                  width={sceneryTransform.width}
+                  height={sceneryTransform.height}
+                  stroke="#7c3aed"
+                  strokeWidth={2 / scale}
+                  dash={[8 / scale, 4 / scale]}
+                  listening={false}
+                />
+              ) : null}
+            </Group>
+          ) : null}
+          {tool === "scenery" && hasSceneryImage ? (
+            <Transformer
+              ref={sceneryTransformerRef}
+              rotateEnabled={false}
+              borderStroke="#7c3aed"
+              anchorStroke="#a78bfa"
+              anchorFill="#1a1a1e"
+              boundBoxFunc={(oldBox, newBox) => {
+                if (newBox.width < 32 || newBox.height < 32) return oldBox;
+                return newBox;
+              }}
+            />
+          ) : null}
+        </Layer>
         <Layer>
           {lines.map((line) => (
             <Line
@@ -653,6 +894,7 @@ export const GeographyCanvas = forwardRef<
               tension={0.4}
               lineCap="round"
               lineJoin="round"
+              listening={tool !== "scenery"}
             />
           ))}
           {Object.entries(peerCursors).map(([peerId, cursor]) => (
