@@ -48,6 +48,7 @@ import {
 } from "@/lib/scenery-synthesis";
 import { cn } from "@/lib/cn";
 import { exportMapSketchToDataUrl } from "@/lib/canvas-sketch-export";
+import { buildGeospatialContext } from "@/lib/scenery-geospatial";
 import { readApiError } from "@/lib/project-api";
 import { toastError, toastSuccess } from "@/store/toast-store";
 import { PinCreator } from "./PinCreator";
@@ -211,6 +212,7 @@ export const GeographyCanvas = forwardRef<
     y: number;
   } | null>(null);
   const [synthesizing, setSynthesizing] = useState(false);
+  const [synthesisUserNotes, setSynthesisUserNotes] = useState("");
   const [sceneryPreviewUrl, setSceneryPreviewUrl] = useState<string | null>(
     null,
   );
@@ -236,6 +238,18 @@ export const GeographyCanvas = forwardRef<
       ) as object,
     );
   }, [onCanvasChange]);
+
+  const persistSynthesisNotes = useCallback(
+    (notes: string) => {
+      const trimmed = notes.trim();
+      canvasMetaRef.current = {
+        ...canvasMetaRef.current,
+        synthesis_user_notes: trimmed.length > 0 ? trimmed : null,
+      };
+      persistCanvas();
+    },
+    [persistCanvas],
+  );
 
   const applySceneryTransform = useCallback(
     (transform: SceneryTransform) => {
@@ -315,6 +329,7 @@ export const GeographyCanvas = forwardRef<
       canvasMetaRef.current = meta;
       setSceneryPreviewUrl(meta.scenery_preview_url ?? null);
       setDepthPreviewUrl(meta.depth_preview_url ?? null);
+      setSynthesisUserNotes(meta.synthesis_user_notes ?? "");
       setSceneryTransform(
         meta.scenery_transform
           ? normalizeSceneryTransform(meta.scenery_transform)
@@ -1016,6 +1031,21 @@ export const GeographyCanvas = forwardRef<
       );
     }
 
+    const notes = synthesisUserNotes.trim();
+    persistSynthesisNotes(notes);
+
+    const geospatial = buildGeospatialContext(
+      lines,
+      pins.map((p) => ({
+        canvas_x: p.canvas_x,
+        canvas_y: p.canvas_y,
+        label: p.label,
+        description: p.description,
+      })),
+      size.width,
+      size.height,
+    );
+
     setSynthesizing(true);
     try {
       const res = await fetch(
@@ -1024,10 +1054,10 @@ export const GeographyCanvas = forwardRef<
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            sketch_description:
-              "Cinematic geography map backdrop faithful to the sketched terrain layout",
             sketch_data_url: sketchDataUrl ?? undefined,
             has_strokes: hasStrokes,
+            synthesis_user_notes: notes.length > 0 ? notes : null,
+            geospatial,
           }),
         },
       );
@@ -1086,7 +1116,17 @@ export const GeographyCanvas = forwardRef<
     } finally {
       setSynthesizing(false);
     }
-  }, [apiAvailable, synthesizing, projectId, lines, pins]);
+  }, [
+    apiAvailable,
+    synthesizing,
+    projectId,
+    lines,
+    pins,
+    size.width,
+    size.height,
+    synthesisUserNotes,
+    persistSynthesisNotes,
+  ]);
 
   const toolbar = useMemo(
     () => (
@@ -1121,7 +1161,21 @@ export const GeographyCanvas = forwardRef<
           </button>
         ) : null}
         {apiAvailable ? (
-          <button
+          <>
+            <input
+              type="text"
+              value={synthesisUserNotes}
+              onChange={(e) => setSynthesisUserNotes(e.target.value)}
+              onBlur={() => persistSynthesisNotes(synthesisUserNotes)}
+              placeholder="Extra instructions (2D, watercolor…)"
+              disabled={synthesizing}
+              aria-label="Scenery synthesis instructions"
+              className={cn(
+                "w-36 min-w-0 rounded-md border border-[#2a2a2e] bg-[#0f0f12] px-2 py-1 text-xs text-[#e5e7eb] placeholder:text-[#6b7280] sm:w-48",
+                synthesizing && "cursor-not-allowed opacity-60",
+              )}
+            />
+            <button
             type="button"
             disabled={synthesizing}
             onClick={() => void handleSynthesizeScenery()}
@@ -1132,10 +1186,19 @@ export const GeographyCanvas = forwardRef<
           >
             {synthesizing ? "Synthesizing…" : "Synthesize"}
           </button>
+          </>
         ) : null}
       </div>
     ),
-    [tool, hasSceneryImage, apiAvailable, synthesizing, handleSynthesizeScenery],
+    [
+      tool,
+      hasSceneryImage,
+      apiAvailable,
+      synthesizing,
+      synthesisUserNotes,
+      persistSynthesisNotes,
+      handleSynthesizeScenery,
+    ],
   );
 
   return (

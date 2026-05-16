@@ -52,6 +52,7 @@ export interface CanvasMeta {
   scenery_fal_model?: string | null;
   last_synthesis_at?: string | null;
   scenery_transform?: SceneryTransform | null;
+  synthesis_user_notes?: string | null;
 }
 
 const META_KEYS: (keyof CanvasMeta)[] = [
@@ -61,6 +62,7 @@ const META_KEYS: (keyof CanvasMeta)[] = [
   "scenery_fal_model",
   "last_synthesis_at",
   "scenery_transform",
+  "synthesis_user_notes",
 ];
 
 type KonvaNode = {
@@ -97,6 +99,9 @@ function pickMeta(source: Record<string, unknown>): CanvasMeta {
       const value = source[key];
       if (key === "scenery_transform") {
         meta.scenery_transform = isSceneryTransform(value) ? value : null;
+      } else if (key === "synthesis_user_notes") {
+        meta.synthesis_user_notes =
+          typeof value === "string" ? value : value === null ? null : undefined;
       } else {
         meta[key] = value as CanvasMeta[typeof key];
       }
