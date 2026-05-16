@@ -1,36 +1,53 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SagaSandbox
 
-## Getting Started
+Agentic multimodal storytelling canvas — collaborative world-building, timeline, and canvas workspace.
 
-First, run the development server:
+**Production:** https://sagasandbox.vercel.app
+
+## Getting started
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Copy [`.env.example`](.env.example) to `.env.local` and fill in keys as features are added.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Deployments (collaborators)
 
-## Learn More
+Vercel Hobby only allows the project owner to deploy from a private repo via native Git integration. This project uses **GitHub Actions** with the owner's Vercel token so **any collaborator** can trigger deploys without a Vercel account.
 
-To learn more about Next.js, take a look at the following resources:
+### Workflow
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Push your branch and open a **pull request** against `main`.
+2. The [Vercel Deploy](.github/workflows/vercel-deploy.yml) workflow runs and posts a **preview URL** on the PR.
+3. After review, merge to `main` → production deploys to https://sagasandbox.vercel.app.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Native Vercel Git auto-deploys are disabled in [`vercel.json`](vercel.json); GitHub Actions is the single deploy path.
 
-## Deploy on Vercel
+### One-time setup (project owner)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. **Make the repo public** (required for free Hobby collaboration): GitHub → **Settings** → **General** → **Danger zone** → **Change visibility** → **Public**.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+2. **Add GitHub Actions secrets** (Settings → Secrets and variables → Actions → New repository secret):
+
+   | Secret | Value |
+   |--------|--------|
+   | `VERCEL_TOKEN` | Create at [vercel.com/account/tokens](https://vercel.com/account/tokens) |
+   | `VERCEL_ORG_ID` | `team_DrVFOfC7OApuPRQbIJ3FdjRs` |
+   | `VERCEL_PROJECT_ID` | `prj_iWBLibMvjryvxvwJCSP3UIR0jt4T` |
+
+3. Push to `main` or open a PR to confirm the workflow passes.
+
+### Tips for contributors
+
+- You only need **GitHub** access; no Vercel account required.
+- Set `git config user.email` to your GitHub verified or noreply email for clear commit attribution.
+- If the deploy check fails, ask the owner to confirm the three secrets above are set.
+
+## Learn more
+
+- [Next.js documentation](https://nextjs.org/docs)
+- [Vercel collaboration (Hobby limits)](https://vercel.com/docs/deployments/troubleshoot-project-collaboration)
