@@ -20,6 +20,12 @@ import {
   type CanvasOpPayload,
 } from "@/hooks/useRealtime";
 import { extractCanvasMeta, parseKonvaCanvasState } from "@/lib/canvas-state";
+import {
+  isSceneryPreviewResolved,
+  SCENERY_ERROR,
+  SCENERY_PENDING,
+  SCENERY_SYNTHESIS_TIMEOUT_MS,
+} from "@/lib/scenery-synthesis";
 import { cn } from "@/lib/cn";
 import { toastError, toastSuccess } from "@/store/toast-store";
 import { PinCreator } from "./PinCreator";
@@ -88,6 +94,7 @@ export const GeographyCanvas = forwardRef<
   const stageRef = useRef<Konva.Stage>(null);
   const cursorThrottleRef = useRef(0);
   const hydratedStateKeyRef = useRef<string | null>(null);
+  const sceneryPendingStartedRef = useRef<number | null>(null);
   const [size, setSize] = useState({ width: 800, height: 600 });
   const [tool, setTool] = useState<CanvasTool>("brush");
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 });
@@ -187,28 +194,75 @@ export const GeographyCanvas = forwardRef<
   }, [initialCanvasState, hydrateFromState]);
 
   useEffect(() => {
-    if (sceneryPreviewUrl !== "pending" || !apiAvailable) return;
+    if (sceneryPreviewUrl !== SCENERY_PENDING || !apiAvailable) {
+      sceneryPendingStartedRef.current = null;
+      return;
+    }
+
+    if (sceneryPendingStartedRef.current === null) {
+      sceneryPendingStartedRef.current = Date.now();
+    }
 
     let cancelled = false;
+
+    const applyMeta = (meta: {
+      scenery_preview_url?: string | null;
+      depth_preview_url?: string | null;
+    }) => {
+      if (meta.depth_preview_url) {
+        setDepthPreviewUrl(meta.depth_preview_url);
+      }
+      if (isSceneryPreviewResolved(meta.scenery_preview_url)) {
+        setSceneryPreviewUrl(meta.scenery_preview_url!);
+        sceneryPendingStartedRef.current = null;
+        toastSuccess("Scenery synthesis complete");
+        return true;
+      }
+      if (meta.scenery_preview_url === SCENERY_ERROR) {
+        setSceneryPreviewUrl(null);
+        sceneryPendingStartedRef.current = null;
+        toastError("Scenery generation failed. Try again.");
+        return true;
+      }
+      return false;
+    };
+
     const poll = async () => {
+      const startedAt = sceneryPendingStartedRef.current;
+      if (
+        startedAt !== null &&
+        Date.now() - startedAt > SCENERY_SYNTHESIS_TIMEOUT_MS
+      ) {
+        if (!cancelled) {
+          setSceneryPreviewUrl(null);
+          sceneryPendingStartedRef.current = null;
+          toastError(
+            "Scenery generation timed out. Check FAL_KEY and webhook URL, then try again.",
+          );
+        }
+        return;
+      }
+
       try {
-        const res = await fetch(`/api/projects/${projectId}`);
-        if (!res.ok) return;
-        const { project } = (await res.json()) as {
-          project: { canvas_state?: Record<string, unknown> };
+        const res = await fetch(
+          `/api/projects/${projectId}/canvas/synthesize/status`,
+        );
+        if (!res.ok || cancelled) return;
+
+        const data = (await res.json()) as {
+          status: "idle" | "pending" | "complete" | "error";
+          canvas_meta?: {
+            scenery_preview_url?: string | null;
+            depth_preview_url?: string | null;
+          };
         };
-        const meta = extractCanvasMeta(project.canvas_state);
-        if (
-          meta.scenery_preview_url &&
-          meta.scenery_preview_url !== "pending"
-        ) {
-          if (!cancelled) {
-            setSceneryPreviewUrl(meta.scenery_preview_url);
-            if (meta.depth_preview_url) {
-              setDepthPreviewUrl(meta.depth_preview_url);
-            }
-            toastSuccess("Scenery synthesis complete");
-          }
+
+        if (data.canvas_meta && applyMeta(data.canvas_meta)) return;
+
+        if (data.status === "error" && !cancelled) {
+          setSceneryPreviewUrl(null);
+          sceneryPendingStartedRef.current = null;
+          toastError("Scenery generation failed. Try again.");
         }
       } catch {
         // ignore transient poll errors
@@ -433,10 +487,13 @@ export const GeographyCanvas = forwardRef<
       }
 
       const meta = data.canvas_meta;
-      if (meta?.scenery_preview_url !== undefined) {
-        setSceneryPreviewUrl(meta.scenery_preview_url);
-      } else if (data.queued) {
-        setSceneryPreviewUrl("pending");
+      if (data.queued && meta?.scenery_preview_url === SCENERY_PENDING) {
+        setSceneryPreviewUrl(SCENERY_PENDING);
+        sceneryPendingStartedRef.current = Date.now();
+      } else if (isSceneryPreviewResolved(meta?.scenery_preview_url)) {
+        setSceneryPreviewUrl(meta!.scenery_preview_url!);
+      } else if (meta?.scenery_preview_url === SCENERY_ERROR) {
+        setSceneryPreviewUrl(null);
       }
 
       const depth =
@@ -503,15 +560,17 @@ export const GeographyCanvas = forwardRef<
           <div className="h-48 w-full max-w-md animate-pulse rounded-lg bg-[#1a1a1e]" />
         </div>
       ) : null}
-      {sceneryPreviewUrl && sceneryPreviewUrl !== "pending" ? (
+      {isSceneryPreviewResolved(sceneryPreviewUrl) ? (
         // eslint-disable-next-line @next/next/no-img-element -- Fal preview URL from storage
         <img
-          src={sceneryPreviewUrl}
+          src={sceneryPreviewUrl as string}
           alt="Synthesized scenery preview"
           className="pointer-events-none absolute inset-0 z-[1] h-full w-full object-cover opacity-45"
         />
       ) : null}
-      {depthPreviewUrl && sceneryPreviewUrl !== "pending" && !sceneryPreviewUrl ? (
+      {depthPreviewUrl &&
+      sceneryPreviewUrl !== SCENERY_PENDING &&
+      !isSceneryPreviewResolved(sceneryPreviewUrl) ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={depthPreviewUrl}
@@ -519,7 +578,7 @@ export const GeographyCanvas = forwardRef<
           className="pointer-events-none absolute inset-0 z-[1] h-full w-full object-cover opacity-30 mix-blend-screen"
         />
       ) : null}
-      {sceneryPreviewUrl === "pending" ? (
+      {sceneryPreviewUrl === SCENERY_PENDING ? (
         <div className="pointer-events-none absolute inset-x-4 top-4 z-[2] rounded-md border border-[#7c3aed]/40 bg-[#7c3aed]/15 px-3 py-2 text-center text-xs text-[#e5e7eb]">
           <span className="inline-block animate-pulse">
             Generating scenery preview…

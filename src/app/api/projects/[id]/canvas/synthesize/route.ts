@@ -4,6 +4,7 @@ import { extractCanvasMeta, patchCanvasMeta } from "@/lib/canvas-state";
 import { uploadCanvasSketchDataUrl } from "@/lib/canvas-sketch-upload";
 import { buildPrompt, falQueue, projectStyleConfig } from "@/lib/fal";
 import { falDepthMap } from "@/lib/fal-media";
+import { SCENERY_PENDING } from "@/lib/scenery-synthesis";
 import type { Json } from "@/types/db";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -88,7 +89,7 @@ export async function POST(request: Request, context: RouteContext) {
     const canvasState = patchCanvasMeta(
       project.canvas_state as Record<string, unknown> | null,
       {
-        scenery_preview_url: result ? "pending" : null,
+        scenery_preview_url: result ? SCENERY_PENDING : null,
         scenery_fal_request_id: result?.requestId ?? null,
         depth_preview_url: depthPreviewUrl,
         last_synthesis_at: new Date().toISOString(),

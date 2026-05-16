@@ -28,18 +28,91 @@ if (!adminKey) {
 const supabase = createClient(Deno.env.get("SUPABASE_URL")!, adminKey)
 
 type FalWebhookPayload = {
-  request_id: string
+  request_id?: string
+  requestId?: string
   status: string
+  payload?: {
+    images?: Array<{ url?: string }>
+    image?: { url?: string }
+  }
   output?: {
     images?: Array<{ url?: string }>
     image?: { url?: string }
   }
+  error?: string
+}
+
+function getFalImageUrl(body: FalWebhookPayload): string | null {
+  const data = body.payload ?? body.output
+  return data?.images?.[0]?.url ?? data?.image?.url ?? null
+}
+
+function patchSceneryState(
+  state: Record<string, unknown>,
+  metaPatch: Record<string, unknown>,
+): Record<string, unknown> {
+  if (state.stage && typeof state.stage === "object") {
+    const prevMeta =
+      typeof state.meta === "object" && state.meta !== null
+        ? (state.meta as Record<string, unknown>)
+        : {}
+    return { ...state, meta: { ...prevMeta, ...metaPatch } }
+  }
+  if (state.className === "Stage") {
+    return { ...state, ...metaPatch }
+  }
+  const prevMeta =
+    typeof state.meta === "object" && state.meta !== null
+      ? (state.meta as Record<string, unknown>)
+      : {}
+  return { ...state, meta: { ...prevMeta, ...metaPatch } }
+}
+
+async function findSceneryProject(requestId: string) {
+  const { data: byMeta } = await supabase
+    .from("projects")
+    .select("id, canvas_state")
+    .filter("canvas_state->meta->>scenery_fal_request_id", "eq", requestId)
+    .maybeSingle()
+
+  if (byMeta) return byMeta
+
+  const { data: byRoot } = await supabase
+    .from("projects")
+    .select("id, canvas_state")
+    .filter("canvas_state->>scenery_fal_request_id", "eq", requestId)
+    .maybeSingle()
+
+  return byRoot
+}
+
+async function markSceneryError(requestId: string) {
+  const sceneryProject = await findSceneryProject(requestId)
+  if (!sceneryProject?.canvas_state) return
+
+  const nextState = patchSceneryState(
+    sceneryProject.canvas_state as Record<string, unknown>,
+    {
+      scenery_preview_url: "error",
+      scenery_fal_request_id: null,
+    },
+  )
+
+  await supabase
+    .from("projects")
+    .update({ canvas_state: nextState })
+    .eq("id", sceneryProject.id)
 }
 
 Deno.serve(async (req) => {
   try {
-    const payload = (await req.json()) as FalWebhookPayload
-    const { request_id, status, output } = payload
+    const body = (await req.json()) as FalWebhookPayload
+    const request_id = body.request_id ?? body.requestId
+    const { status } = body
+
+    if (!request_id) {
+      return Response.json({ error: "missing request_id" }, { status: 400 })
+    }
 
     const { data: pin } = await supabase
       .from("location_pins")
@@ -78,18 +151,21 @@ Deno.serve(async (req) => {
           .update({ gen_status: "error" })
           .eq("id", character.id)
       }
+      await markSceneryError(request_id)
       return Response.json({ ok: true })
     }
 
     if (status !== "OK") return Response.json({ ok: true })
 
-    const imageUrl = output?.images?.[0]?.url ?? output?.image?.url
+    const imageUrl = getFalImageUrl(body)
     if (!imageUrl) {
+      await markSceneryError(request_id)
       return Response.json({ error: "no image url" }, { status: 400 })
     }
 
     const imgResponse = await fetch(imageUrl)
     if (!imgResponse.ok) {
+      await markSceneryError(request_id)
       return Response.json({ error: "failed to download image" }, { status: 502 })
     }
 
@@ -133,37 +209,16 @@ Deno.serve(async (req) => {
         .eq("id", character.id)
     }
 
-    const { data: sceneryProject } = await supabase
-      .from("projects")
-      .select("id, canvas_state")
-      .or(
-        `canvas_state->>scenery_fal_request_id.eq.${request_id},canvas_state->meta->>scenery_fal_request_id.eq.${request_id}`,
-      )
-      .maybeSingle()
+    const sceneryProject = await findSceneryProject(request_id)
 
     if (sceneryProject?.canvas_state) {
-      const state = sceneryProject.canvas_state as Record<string, unknown>
-      const metaPatch = {
-        scenery_preview_url: storageUrl,
-        scenery_fal_request_id: null,
-      }
-
-      let nextState: Record<string, unknown>
-      if (state.stage && typeof state.stage === "object") {
-        const prevMeta =
-          typeof state.meta === "object" && state.meta !== null
-            ? (state.meta as Record<string, unknown>)
-            : {}
-        nextState = { ...state, meta: { ...prevMeta, ...metaPatch } }
-      } else if (state.className === "Stage") {
-        nextState = { ...state, ...metaPatch }
-      } else {
-        const prevMeta =
-          typeof state.meta === "object" && state.meta !== null
-            ? (state.meta as Record<string, unknown>)
-            : {}
-        nextState = { ...state, meta: { ...prevMeta, ...metaPatch } }
-      }
+      const nextState = patchSceneryState(
+        sceneryProject.canvas_state as Record<string, unknown>,
+        {
+          scenery_preview_url: storageUrl,
+          scenery_fal_request_id: null,
+        },
+      )
 
       await supabase
         .from("projects")
