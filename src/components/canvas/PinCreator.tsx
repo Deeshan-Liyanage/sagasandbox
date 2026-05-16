@@ -2,11 +2,16 @@
 
 import { useState } from "react";
 import type { LocationPin } from "@/types/app";
+import {
+  PROJECT_API_UNAVAILABLE_MESSAGE,
+  readApiError,
+} from "@/lib/project-api";
 
 interface PinCreatorProps {
   projectId: string;
   canvasX: number;
   canvasY: number;
+  apiAvailable?: boolean;
   onCreated: (pin: LocationPin) => void;
   onCancel: () => void;
 }
@@ -15,6 +20,7 @@ export function PinCreator({
   projectId,
   canvasX,
   canvasY,
+  apiAvailable = true,
   onCreated,
   onCancel,
 }: PinCreatorProps) {
@@ -25,6 +31,10 @@ export function PinCreator({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!apiAvailable) {
+      setError(PROJECT_API_UNAVAILABLE_MESSAGE);
+      return;
+    }
     if (!label.trim()) {
       setError("Label is required");
       return;
@@ -43,10 +53,7 @@ export function PinCreator({
         }),
       });
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(
-          (body as { error?: string }).error ?? "Failed to create pin",
-        );
+        throw new Error(await readApiError(res, "Failed to create pin"));
       }
       const { pin } = (await res.json()) as { pin: LocationPin };
       onCreated(pin);
@@ -90,7 +97,7 @@ export function PinCreator({
         </button>
         <button
           type="submit"
-          disabled={loading}
+          disabled={loading || !apiAvailable}
           className="rounded bg-[#7c3aed] px-3 py-1 text-xs font-medium text-white disabled:opacity-60"
         >
           {loading ? "Adding…" : "Add pin"}
