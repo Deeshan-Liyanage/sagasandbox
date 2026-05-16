@@ -27,19 +27,26 @@ if (!adminKey) {
 
 const supabase = createClient(Deno.env.get("SUPABASE_URL")!, adminKey)
 
-type FalWebhookPayload = {
+type FalImageOutput = {
+  images?: Array<{ url?: string }>
+  image?: { url?: string }
+}
+
+/** Shape of the POST body fal.ai sends to the webhook URL. */
+type FalWebhookBody = {
   request_id: string
-  status: string
-  output?: {
-    images?: Array<{ url?: string }>
-    image?: { url?: string }
-  }
+  /** "OK" on success, "ERROR" on failure. */
+  status: "OK" | "ERROR" | string
+  /** Present when status === "OK" — the model's raw output object. */
+  payload?: FalImageOutput
+  /** Present when status === "ERROR". */
+  error?: string
 }
 
 Deno.serve(async (req) => {
   try {
-    const payload = (await req.json()) as FalWebhookPayload
-    const { request_id, status, output } = payload
+    const body = (await req.json()) as FalWebhookBody
+    const { request_id, status, payload: falOutput } = body
 
     const { data: pin } = await supabase
       .from("location_pins")
@@ -60,6 +67,7 @@ Deno.serve(async (req) => {
       .maybeSingle()
 
     if (status === "ERROR") {
+      console.error(`[fal-webhook] request_id=${request_id} ERROR`)
       if (pin && pin.gen_status !== "done") {
         await supabase
           .from("location_pins")
@@ -81,33 +89,26 @@ Deno.serve(async (req) => {
       return Response.json({ ok: true })
     }
 
-    if (status !== "OK") return Response.json({ ok: true })
+    if (status !== "OK") {
+      console.warn(`[fal-webhook] request_id=${request_id} unexpected status=${status}`)
+      return Response.json({ ok: true })
+    }
 
-    const imageUrl = output?.images?.[0]?.url ?? output?.image?.url
+    const imageUrl = falOutput?.images?.[0]?.url ?? falOutput?.image?.url
     if (!imageUrl) {
+      console.error(`[fal-webhook] request_id=${request_id} no image url in payload`, JSON.stringify(falOutput))
       return Response.json({ error: "no image url" }, { status: 400 })
     }
 
-    const imgResponse = await fetch(imageUrl)
-    if (!imgResponse.ok) {
-      return Response.json({ error: "failed to download image" }, { status: 502 })
-    }
+    console.log(`[fal-webhook] request_id=${request_id} imageUrl=${imageUrl}`)
 
-    const blob = await imgResponse.blob()
-    const fileName = `generated/${request_id}.jpg`
-
-    await supabase.storage
-      .from("images")
-      .upload(fileName, blob, { contentType: "image/jpeg", upsert: true })
-
-    const { data: publicUrl } = supabase.storage.from("images").getPublicUrl(fileName)
-    const storageUrl = publicUrl.publicUrl
-
+    // Store the fal.ai CDN URL directly — simpler and avoids an extra fetch+upload round-trip.
+    // The images bucket is public so previously uploaded files remain accessible too.
     if (pin && pin.gen_status !== "done") {
       await supabase
         .from("location_pins")
         .update({
-          generated_image_url: storageUrl,
+          generated_image_url: imageUrl,
           gen_status: "done",
         })
         .eq("id", pin.id)
@@ -117,7 +118,7 @@ Deno.serve(async (req) => {
       await supabase
         .from("timeline_events")
         .update({
-          generated_image_url: storageUrl,
+          generated_image_url: imageUrl,
           gen_status: "done",
         })
         .eq("id", event.id)
@@ -127,7 +128,7 @@ Deno.serve(async (req) => {
       await supabase
         .from("characters")
         .update({
-          generated_portrait_url: storageUrl,
+          generated_portrait_url: imageUrl,
           gen_status: "done",
         })
         .eq("id", character.id)
