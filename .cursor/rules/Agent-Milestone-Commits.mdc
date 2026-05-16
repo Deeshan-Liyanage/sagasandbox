@@ -9,6 +9,8 @@ alwaysApply: true
 
 Pair with [Branch-Naming.mdc](Branch-Naming.mdc): never commit on `main`; use a feature branch whose `type` matches the work.
 
+Pair with [No-Secrets-In-Repo.mdc](No-Secrets-In-Repo.mdc): never stage API keys, tokens, or credentials — see that rule before every commit.
+
 ## When to commit (milestones)
 
 Commit when **all** of the following are true:
@@ -27,7 +29,7 @@ Commit when **all** of the following are true:
 ## When not to commit
 
 - No file changes, or only accidental/format noise unrelated to the task
-- Files that may contain secrets (`.env`, keys, credentials) — never stage these
+- Files that may contain secrets — see [No-Secrets-In-Repo.mdc](No-Secrets-In-Repo.mdc); never stage `.env*` (except `.env.example`), keys, or credentials
 - The tree is knowingly broken and you have not yet attempted a minimal fix (fix first, then commit)
 - The user explicitly asked **not** to commit yet in this thread
 
