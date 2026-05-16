@@ -1,5 +1,12 @@
-"use client";
+﻿"use client";
 
+import { useLayoutEffect, useMemo } from "react";
+import {
+  Group,
+  Panel,
+  useDefaultLayout,
+  usePanelRef,
+} from "react-resizable-panels";
 import {
   Download,
   Map,
@@ -7,43 +14,104 @@ import {
   Users,
   FileOutput,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import { LogoutButton } from "@/components/auth/LogoutButton";
+import { WorkspacePaneChrome } from "@/components/layout/WorkspacePaneChrome";
+import { PaneResizeHandle } from "@/components/layout/PaneResizeHandle";
 import { cn } from "@/lib/cn";
 import { themeAccent } from "@/lib/constants";
+import {
+  layoutGroupId,
+  type LayoutPresetId,
+  type PaneVisibility,
+  type WorkspacePaneId,
+} from "@/lib/workspace-panes";
 
-export type SidebarNav = "canvas" | "timeline" | "vault" | "export";
-
-export interface AppShellProps {
-  projectName: string;
-  theme: string;
-  children?: React.ReactNode;
-  sidebarContent?: React.ReactNode;
-  timelineContent?: React.ReactNode;
-  activeNav?: SidebarNav;
-  onNavChange?: (nav: SidebarNav) => void;
-  onExportClick?: () => void;
-  headerActions?: React.ReactNode;
+function safeLayoutStorage(): Pick<Storage, "getItem" | "setItem"> {
+  if (typeof window === "undefined") {
+    return {
+      getItem: () => null,
+      setItem: () => {},
+    };
+  }
+  return localStorage;
 }
 
-const NAV_ITEMS: { id: SidebarNav; label: string; icon: typeof Map }[] = [
-  { id: "canvas", label: "Canvas", icon: Map },
-  { id: "timeline", label: "Timeline", icon: Clock },
-  { id: "vault", label: "Vault", icon: Users },
-  { id: "export", label: "Export", icon: FileOutput },
-];
+export interface AppShellProps {
+  projectId: string;
+  projectName: string;
+  theme: string;
+  paneVisibility: PaneVisibility;
+  onTogglePane: (id: WorkspacePaneId) => void;
+  onApplyLayoutPreset: (preset: LayoutPresetId) => void;
+  canvasContent: ReactNode;
+  timelineContent: ReactNode;
+  vaultContent: ReactNode;
+  exportContent: ReactNode;
+  headerActions?: ReactNode;
+  onExportClick?: () => void;
+}
+
+const RAIL_ICONS = {
+  canvas: Map,
+  timeline: Clock,
+  vault: Users,
+  export: FileOutput,
+} as const;
 
 export function AppShell({
+  projectId,
   projectName,
   theme,
-  children,
-  sidebarContent,
+  paneVisibility,
+  onTogglePane,
+  onApplyLayoutPreset,
+  canvasContent,
   timelineContent,
-  activeNav = "canvas",
-  onNavChange,
-  onExportClick,
+  vaultContent,
+  exportContent,
   headerActions,
+  onExportClick,
 }: AppShellProps) {
   const accent = themeAccent(theme);
+  const storage = useMemo(() => safeLayoutStorage(), []);
+
+  const horizontalLayout = useDefaultLayout({
+    id: layoutGroupId(projectId, "horizontal"),
+    storage,
+    panelIds: ["vault", "canvas", "export"],
+  });
+
+  const verticalLayout = useDefaultLayout({
+    id: layoutGroupId(projectId, "vertical"),
+    storage,
+    panelIds: ["main", "timeline"],
+  });
+
+  const vaultPanelRef = usePanelRef();
+  const exportPanelRef = usePanelRef();
+  const timelinePanelRef = usePanelRef();
+
+  useLayoutEffect(() => {
+    const p = vaultPanelRef.current;
+    if (!p) return;
+    if (paneVisibility.vault) p.expand();
+    else p.collapse();
+  }, [paneVisibility.vault, vaultPanelRef]);
+
+  useLayoutEffect(() => {
+    const p = exportPanelRef.current;
+    if (!p) return;
+    if (paneVisibility.export) p.expand();
+    else p.collapse();
+  }, [paneVisibility.export, exportPanelRef]);
+
+  useLayoutEffect(() => {
+    const p = timelinePanelRef.current;
+    if (!p) return;
+    if (paneVisibility.timeline) p.expand();
+    else p.collapse();
+  }, [paneVisibility.timeline, timelinePanelRef]);
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#0e0e0f] text-[#e5e7eb]">
@@ -63,6 +131,26 @@ export function AppShell({
           </span>
         </div>
         <div className="flex items-center gap-2">
+          <label className="sr-only" htmlFor="workspace-layout-preset">
+            Workspace layout
+          </label>
+          <select
+            id="workspace-layout-preset"
+            defaultValue=""
+            onChange={(e) => {
+              const v = e.target.value as LayoutPresetId;
+              if (v) onApplyLayoutPreset(v);
+              e.target.value = "";
+            }}
+            className="rounded-md border border-[#2a2a2e] bg-[#1a1a1e] px-2 py-1.5 text-xs font-medium text-[#e5e7eb] outline-none hover:border-[#7c3aed]/50 focus-visible:ring-2 focus-visible:ring-[#7c3aed]/40"
+          >
+            <option value="" disabled>
+              Layout presets
+            </option>
+            <option value="default">Default</option>
+            <option value="focus-canvas">Focus canvas</option>
+            <option value="full">Full workspace</option>
+          </select>
           {headerActions}
           <LogoutButton iconOnly />
           <button
@@ -77,36 +165,147 @@ export function AppShell({
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <aside className="flex w-[220px] shrink-0 flex-col border-r border-[#2a2a2e] bg-[#1a1a1e] xl:w-[280px]">
-          <nav className="flex flex-col gap-1 p-3">
-            {NAV_ITEMS.map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => onNavChange?.(id)}
-                className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition",
-                  activeNav === id
-                    ? "bg-[#2a2a2e] text-white"
-                    : "text-[#9ca3af] hover:bg-[#252528] hover:text-[#e5e7eb]",
-                )}
+        <nav
+          className="flex w-[52px] shrink-0 flex-col items-center gap-1 border-r border-[#2a2a2e] bg-[#141416] py-2"
+          aria-label="Workspace panes"
+        >
+          <RailIconButton
+            label="Focus canvas"
+            icon={RAIL_ICONS.canvas}
+            active={false}
+            onClick={() => onApplyLayoutPreset("focus-canvas")}
+          />
+          <RailIconButton
+            label="Toggle timeline"
+            icon={RAIL_ICONS.timeline}
+            active={paneVisibility.timeline}
+            onClick={() => onTogglePane("timeline")}
+          />
+          <RailIconButton
+            label="Toggle vault"
+            icon={RAIL_ICONS.vault}
+            active={paneVisibility.vault}
+            onClick={() => onTogglePane("vault")}
+          />
+          <RailIconButton
+            label="Toggle export"
+            icon={RAIL_ICONS.export}
+            active={paneVisibility.export}
+            onClick={() => onTogglePane("export")}
+          />
+        </nav>
+
+        <Group
+          id={layoutGroupId(projectId, "vertical")}
+          orientation="vertical"
+          className="min-h-0 min-w-0 flex-1"
+          defaultLayout={verticalLayout.defaultLayout}
+          onLayoutChanged={verticalLayout.onLayoutChanged}
+        >
+          <Panel
+            id="main"
+            className="min-h-0 min-w-0"
+            defaultSize={72}
+            minSize={35}
+          >
+            <Group
+              id={layoutGroupId(projectId, "horizontal")}
+              orientation="horizontal"
+              className="h-full min-h-0"
+              defaultLayout={horizontalLayout.defaultLayout}
+              onLayoutChanged={horizontalLayout.onLayoutChanged}
+            >
+              <Panel
+                id="vault"
+                panelRef={vaultPanelRef}
+                className="min-h-0 min-w-0"
+                collapsible
+                collapsedSize={0}
+                minSize={12}
+                defaultSize={18}
               >
-                <Icon className="h-4 w-4" />
-                {label}
-              </button>
-            ))}
-          </nav>
-          <div className="min-h-0 flex-1 overflow-y-auto border-t border-[#2a2a2e] p-3">
-            {sidebarContent}
-          </div>
-        </aside>
+                <WorkspacePaneChrome title="Character vault" bodyClassName="overflow-y-auto">
+                  {vaultContent}
+                </WorkspacePaneChrome>
+              </Panel>
+              <PaneResizeHandle direction="vertical" />
+              <Panel
+                id="canvas"
+                className="min-h-0 min-w-0"
+                defaultSize={64}
+                minSize={28}
+              >
+                <div className="relative h-full min-h-0 w-full min-w-0 overflow-hidden bg-[#0f0f12]">
+                  {canvasContent}
+                </div>
+              </Panel>
+              <PaneResizeHandle direction="vertical" />
+              <Panel
+                id="export"
+                panelRef={exportPanelRef}
+                className="min-h-0 min-w-0"
+                collapsible
+                collapsedSize={0}
+                minSize={12}
+                defaultSize={18}
+              >
+                <WorkspacePaneChrome title="Export" bodyClassName="overflow-y-auto">
+                  {exportContent}
+                </WorkspacePaneChrome>
+              </Panel>
+            </Group>
+          </Panel>
 
-        <main className="relative min-w-0 flex-1">{children}</main>
+          <PaneResizeHandle direction="horizontal" />
+
+          <Panel
+            id="timeline"
+            panelRef={timelinePanelRef}
+            className="min-h-0 min-w-0"
+            collapsible
+            collapsedSize={0}
+            minSize={14}
+            defaultSize={28}
+          >
+            <WorkspacePaneChrome
+              title="Timeline"
+              bodyClassName="overflow-hidden"
+            >
+              {timelineContent}
+            </WorkspacePaneChrome>
+          </Panel>
+        </Group>
       </div>
-
-      <footer className="h-[100px] shrink-0 overflow-hidden border-t border-[#2a2a2e] bg-[#141416] xl:h-[120px]">
-        {timelineContent}
-      </footer>
     </div>
   );
 }
+
+function RailIconButton({
+  label,
+  icon: Icon,
+  active,
+  onClick,
+}: {
+  label: string;
+  icon: (typeof RAIL_ICONS)[keyof typeof RAIL_ICONS];
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        "flex h-10 w-10 items-center justify-center rounded-lg border border-transparent text-[#9ca3af] transition hover:bg-[#252528] hover:text-[#e5e7eb]",
+        active &&
+          "border-[#7c3aed]/40 bg-[#7c3aed]/10 text-[#c4b5fd]",
+      )}
+    >
+      <Icon className="h-5 w-5 shrink-0" />
+    </button>
+  );
+}
+
