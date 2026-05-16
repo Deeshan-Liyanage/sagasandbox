@@ -14,15 +14,35 @@ export interface ParsedCanvasState {
   viewport: ParsedCanvasViewport;
 }
 
+export const MIN_SCENERY_SIZE = 64;
+
 export interface SceneryTransform {
   x: number;
   y: number;
-  /** Reference width (typically natural image width). */
+  /** Display width in stage coordinates (scale is always baked in). */
   width: number;
-  /** Reference height (typically natural image height). */
+  /** Display height in stage coordinates (scale is always baked in). */
   height: number;
   scaleX: number;
   scaleY: number;
+}
+
+/** Normalize persisted transform so Konva never double-applies scale. */
+export function normalizeSceneryTransform(
+  transform: SceneryTransform,
+): SceneryTransform {
+  const scaleX = transform.scaleX > 0 ? transform.scaleX : 1;
+  const scaleY = transform.scaleY > 0 ? transform.scaleY : 1;
+  const width = Math.max(MIN_SCENERY_SIZE, transform.width * scaleX);
+  const height = Math.max(MIN_SCENERY_SIZE, transform.height * scaleY);
+  return {
+    x: transform.x,
+    y: transform.y,
+    width,
+    height,
+    scaleX: 1,
+    scaleY: 1,
+  };
 }
 
 export interface CanvasMeta {
