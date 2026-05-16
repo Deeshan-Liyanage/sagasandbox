@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { isAuthError, jsonError, requireAuth } from "@/lib/api-auth";
+import {
+  getEdgeFunctionInvokeHeaders,
+  getSupabaseAdminKey,
+} from "@/lib/supabase-admin";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -36,15 +40,12 @@ export async function POST(request: Request, context: RouteContext) {
     if (error || !exportRow) return jsonError(error?.message ?? "Insert failed");
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const adminKey = getSupabaseAdminKey();
 
-    if (supabaseUrl && serviceKey) {
+    if (supabaseUrl && adminKey) {
       void fetch(`${supabaseUrl}/functions/v1/process-export`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${serviceKey}`,
-          "Content-Type": "application/json",
-        },
+        headers: getEdgeFunctionInvokeHeaders(adminKey),
         body: JSON.stringify({ export_id: exportRow.id }),
       }).catch(() => {
         // Edge function may not be deployed yet (Agent B)
