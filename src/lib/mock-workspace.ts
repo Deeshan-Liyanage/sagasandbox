@@ -70,6 +70,8 @@ export function getMockEvents(projectId: string): TimelineEvent[] {
       audio_url: null,
       fal_request_id: null,
       gen_status: "pending",
+      is_ghost: false,
+      audio_summary: null,
       created_at: now,
     },
     {
@@ -84,6 +86,8 @@ export function getMockEvents(projectId: string): TimelineEvent[] {
       audio_url: null,
       fal_request_id: null,
       gen_status: "pending",
+      is_ghost: false,
+      audio_summary: null,
       created_at: now,
     },
   ];

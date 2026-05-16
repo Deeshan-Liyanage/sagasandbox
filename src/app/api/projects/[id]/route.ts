@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { isAuthError, jsonError, requireAuth } from "@/lib/api-auth";
 import { falQueue, projectStyleConfig } from "@/lib/fal";
+import { captureProjectSnapshot } from "@/lib/snapshots";
 import type { Database, Json } from "@/types/db";
 
 type ProjectUpdate = Database["public"]["Tables"]["projects"]["Update"];
@@ -62,6 +63,12 @@ export async function PATCH(request: Request, context: RouteContext) {
     if (error || !project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
+
+    await captureProjectSnapshot(
+      supabase,
+      id,
+      body.cascade ? "Theme cascade" : "Project settings update",
+    );
 
     let queued = 0;
 

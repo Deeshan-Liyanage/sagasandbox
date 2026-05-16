@@ -9,7 +9,7 @@ export type Export = Database["public"]["Tables"]["exports"]["Row"]
 export type ProjectMember = Database["public"]["Tables"]["project_members"]["Row"]
 
 export type GenStatus = "pending" | "generating" | "done" | "error"
-export type ExportType = "storyboard_pdf" | "audio_script"
+export type ExportType = "storyboard_pdf" | "audio_script" | "animatic_video"
 export type ExportStatus = "queued" | "processing" | "done" | "error"
 export type CharacterRole = "primary" | "secondary"
 

@@ -18,7 +18,9 @@ export function ToastHost() {
             "pointer-events-auto rounded-lg border px-4 py-2 text-sm shadow-lg backdrop-blur",
             t.variant === "error"
               ? "border-[#ef4444]/40 bg-[#1a1a1e]/95 text-[#fca5a5]"
-              : "border-[#2a2a2e] bg-[#1a1a1e]/95 text-[#e5e7eb]",
+              : t.variant === "success"
+                ? "border-[#10b981]/40 bg-[#1a1a1e]/95 text-[#6ee7b7]"
+                : "border-[#2a2a2e] bg-[#1a1a1e]/95 text-[#e5e7eb]",
           )}
         >
           <div className="flex items-start justify-between gap-3">

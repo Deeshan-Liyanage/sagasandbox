@@ -281,8 +281,114 @@ export type Database = {
           },
         ]
       }
+      agent_logs: {
+        Row: {
+          action_taken: boolean | null
+          created_at: string
+          id: string
+          project_id: string
+          query: string
+          response: string
+          revert_reference_id: string | null
+        }
+        Insert: {
+          action_taken?: boolean | null
+          created_at?: string
+          id?: string
+          project_id: string
+          query: string
+          response: string
+          revert_reference_id?: string | null
+        }
+        Update: {
+          action_taken?: boolean | null
+          created_at?: string
+          id?: string
+          project_id?: string
+          query?: string
+          response?: string
+          revert_reference_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_logs_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      copilot_pending_changes: {
+        Row: {
+          change_type: string
+          created_at: string
+          id: string
+          payload: Json
+          project_id: string
+          status: string
+        }
+        Insert: {
+          change_type: string
+          created_at?: string
+          id?: string
+          payload?: Json
+          project_id: string
+          status?: string
+        }
+        Update: {
+          change_type?: string
+          created_at?: string
+          id?: string
+          payload?: Json
+          project_id?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "copilot_pending_changes_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      project_snapshots: {
+        Row: {
+          change_description: string | null
+          created_at: string
+          id: string
+          project_id: string
+          state_blob: Json
+        }
+        Insert: {
+          change_description?: string | null
+          created_at?: string
+          id?: string
+          project_id: string
+          state_blob?: Json
+        }
+        Update: {
+          change_description?: string | null
+          created_at?: string
+          id?: string
+          project_id?: string
+          state_blob?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_snapshots_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       timeline_events: {
         Row: {
+          audio_summary: string | null
           audio_url: string | null
           created_at: string
           description: string | null
@@ -291,12 +397,14 @@ export type Database = {
           generated_image_url: string | null
           id: string
           in_world_time: string | null
+          is_ghost: boolean
           pin_id: string | null
           project_id: string
           sequence_order: number
           title: string
         }
         Insert: {
+          audio_summary?: string | null
           audio_url?: string | null
           created_at?: string
           description?: string | null
@@ -305,12 +413,14 @@ export type Database = {
           generated_image_url?: string | null
           id?: string
           in_world_time?: string | null
+          is_ghost?: boolean
           pin_id?: string | null
           project_id: string
           sequence_order: number
           title: string
         }
         Update: {
+          audio_summary?: string | null
           audio_url?: string | null
           created_at?: string
           description?: string | null
@@ -319,6 +429,7 @@ export type Database = {
           generated_image_url?: string | null
           id?: string
           in_world_time?: string | null
+          is_ghost?: boolean
           pin_id?: string | null
           project_id?: string
           sequence_order?: number
@@ -347,11 +458,10 @@ export type Database = {
     }
     Functions: {
       is_project_member: {
-        Args: { p_project_id: string; p_roles?: string[] }
+        Args: { proj_id: string }
         Returns: boolean
       }
       storage_project_id: { Args: { object_name: string }; Returns: string }
-      user_project_role: { Args: { p_project_id: string }; Returns: string }
     }
     Enums: {
       [_ in never]: never

@@ -36,6 +36,7 @@ export interface GeographyCanvasProps {
   loading?: boolean;
   userId?: string;
   apiAvailable?: boolean;
+  highlightedPinId?: string | null;
 }
 
 export interface GeographyCanvasHandle {
@@ -78,6 +79,7 @@ export const GeographyCanvas = forwardRef<
     loading = false,
     userId = "local",
     apiAvailable = true,
+    highlightedPinId = null,
   },
   ref,
 ) {
@@ -363,9 +365,27 @@ export const GeographyCanvas = forwardRef<
             {t}
           </button>
         ))}
+        {apiAvailable ? (
+          <button
+            type="button"
+            onClick={() => {
+              void fetch(`/api/projects/${projectId}/canvas/synthesize`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  sketch_description:
+                    "Living canvas: enhance brush strokes into cinematic scenery",
+                }),
+              });
+            }}
+            className="rounded-md px-3 py-1.5 text-xs font-medium text-[#a78bfa] hover:bg-[#7c3aed]/20"
+          >
+            Synthesize scenery
+          </button>
+        ) : null}
       </div>
     ),
-    [tool],
+    [tool, apiAvailable, projectId],
   );
 
   return (
@@ -450,8 +470,8 @@ export const GeographyCanvas = forwardRef<
               <Circle
                 radius={10}
                 fill={pinColor(pin.gen_status)}
-                stroke="#0e0e0f"
-                strokeWidth={2}
+                stroke={highlightedPinId === pin.id ? "#7c3aed" : "#0e0e0f"}
+                strokeWidth={highlightedPinId === pin.id ? 3 : 2}
                 shadowBlur={pin.gen_status === "generating" ? 8 : 0}
               />
               <Text
