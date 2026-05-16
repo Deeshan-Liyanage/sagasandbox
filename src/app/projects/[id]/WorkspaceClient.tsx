@@ -231,7 +231,7 @@ export function WorkspaceClient({
         setCharacters((prev) =>
           prev.some((c) => c.id === character.id) ? prev : [...prev, character],
         ),
-      onCharacterDelete: (characterId: string) =>
+            onCharacterDelete: (characterId: string) =>
         setCharacters((prev) => prev.filter((c) => c.id !== characterId)),
       onProjectUpdate: handleProjectUpdate,
     }),
@@ -253,6 +253,7 @@ export function WorkspaceClient({
     characters,
     apiAvailable,
   });
+
 
   const vaultPane = useMemo(() => {
     if (panelsBooting) {
