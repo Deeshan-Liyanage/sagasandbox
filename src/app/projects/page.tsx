@@ -1,8 +1,9 @@
 import Link from "next/link"
 import { redirect } from "next/navigation"
 
-import { isSupabaseConfigured } from "@/lib/supabase-env"
+import { ProjectsHeader } from "@/app/projects/projects-header"
 import { DEMO_PROJECT_ID } from "@/lib/mock-workspace"
+import { isSupabaseConfigured } from "@/lib/supabase-env"
 import { createClient } from "@/lib/supabase-server"
 
 export default async function ProjectsPage() {
@@ -46,15 +47,19 @@ export default async function ProjectsPage() {
   return (
     <div className="min-h-screen bg-[#0e0e0f] px-6 py-10 text-[#e5e7eb]">
       <div className="mx-auto max-w-3xl">
-        <h1 className="text-2xl font-semibold">Your universes</h1>
-        <p className="mt-2 text-sm text-[#9ca3af]">
-          Connected to Supabase. API routes for create/edit ship with Agent A.
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold">Your universes</h1>
+            <p className="mt-2 text-sm text-[#9ca3af]">
+              Create and open collaborative story sandboxes.
+            </p>
+          </div>
+          <ProjectsHeader />
+        </div>
         <ul className="mt-8 space-y-3">
           {projects.length === 0 ? (
             <li className="rounded-lg border border-[#2a2a2e] bg-[#1a1a1e] p-4 text-sm text-[#9ca3af]">
-              No projects yet. Use the universe initializer once Agent A lands{" "}
-              <code className="text-[#7c3aed]">POST /api/projects</code>.
+              No projects yet. Create your first universe to get started.
             </li>
           ) : (
             projects.map((p) => (
