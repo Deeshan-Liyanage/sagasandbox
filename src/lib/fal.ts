@@ -2,7 +2,9 @@ import { fal } from "@fal-ai/client"
 
 import type { StyleConfig } from "@/types/app"
 
-fal.config({ credentials: process.env.FAL_KEY! })
+if (process.env.FAL_KEY) {
+  fal.config({ credentials: process.env.FAL_KEY })
+}
 
 export interface FalQueueOptions {
   prompt: string
@@ -16,7 +18,14 @@ export interface FalQueueResult {
   requestId: string
 }
 
-export async function falQueue(options: FalQueueOptions): Promise<FalQueueResult> {
+export async function falQueue(
+  options: FalQueueOptions,
+): Promise<FalQueueResult | null> {
+  if (!process.env.FAL_KEY) {
+    console.warn("FAL_KEY not set — skipping image generation queue")
+    return null
+  }
+
   const {
     prompt,
     model = "fal-ai/flux/dev",
@@ -42,7 +51,7 @@ export async function falQueue(options: FalQueueOptions): Promise<FalQueueResult
 
   const { request_id } = await fal.queue.submit(model, {
     input,
-    webhookUrl,
+    ...(webhookUrl ? { webhookUrl } : {}),
   })
 
   return { requestId: request_id }
@@ -60,9 +69,28 @@ export function buildPrompt(parts: {
   if (styleConfig.aesthetic_style) chunks.push(styleConfig.aesthetic_style)
   if (styleConfig.aesthetic) chunks.push(styleConfig.aesthetic)
   if (styleConfig.theme) chunks.push(`in a ${styleConfig.theme} setting`)
+  if (styleConfig.tone) chunks.push(styleConfig.tone)
   if (location) chunks.push(`at ${location}`)
   if (description) chunks.push(description)
   if (characters?.length) chunks.push(`Characters: ${characters.join(", ")}`)
 
   return chunks.join(". ")
+}
+
+export function projectStyleConfig(project: {
+  theme: string
+  aesthetic_style: string
+  style_config: unknown
+}): StyleConfig {
+  const cfg =
+    typeof project.style_config === "object" && project.style_config !== null
+      ? (project.style_config as StyleConfig)
+      : {}
+  return {
+    ...cfg,
+    theme: cfg.theme ?? project.theme,
+    aesthetic_style: cfg.aesthetic_style ?? project.aesthetic_style,
+    aesthetic: cfg.aesthetic ?? project.aesthetic_style,
+    tone: cfg.tone ?? project.theme.replace(/_/g, " "),
+  }
 }
