@@ -40,7 +40,7 @@ Copy from `.env.example`. Map each variable to **where** it must exist.
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | ✅ | ✅ | — | ✅ |
 | `SUPABASE_SECRET_KEY` | ✅ | ✅ | — | ✅ |
 | `SUPABASE_SERVICE_ROLE_KEY` (legacy fallback) | optional | optional | — | optional |
-| `NEXT_PUBLIC_SITE_URL` | ✅ (preview URL) | ✅ (prod domain) | — | `http://localhost:3000` |
+| `NEXT_PUBLIC_SITE_URL` | ✅ (preview URL) | ✅ (prod domain) | ✅ mirror on `process-export` so animatic Fal jobs receive `fal_webhook` callbacks | `http://localhost:3000` |
 | `FAL_KEY` | ✅ | ✅ | ✅ (image gen + Kokoro TTS) | ✅ |
 | `OPENAI_API_KEY` | ✅ | ✅ | — | ✅ |
 | `AUTH_DEV_BYPASS_ENABLED` | optional (`true` for QA) | ❌ (unless explicit) | — | optional (`true`) |

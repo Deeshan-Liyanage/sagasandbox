@@ -99,6 +99,7 @@ export type Database = {
         Row: {
           created_at: string
           event_ids: string[]
+          fal_request_id: string | null
           id: string
           output_url: string | null
           project_id: string
@@ -108,6 +109,7 @@ export type Database = {
         Insert: {
           created_at?: string
           event_ids?: string[]
+          fal_request_id?: string | null
           id?: string
           output_url?: string | null
           project_id: string
@@ -117,6 +119,7 @@ export type Database = {
         Update: {
           created_at?: string
           event_ids?: string[]
+          fal_request_id?: string | null
           id?: string
           output_url?: string | null
           project_id?: string

@@ -1,5 +1,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
+import { persistExportAnimaticVideo } from "../_shared/export-video-persist.ts"
+import { extractVideoUrlFromFalData } from "../_shared/fal-video-url.ts"
+
 function resolveSupabaseAdminKey() {
   const secretKeysRaw = Deno.env.get("SUPABASE_SECRET_KEYS")
   if (secretKeysRaw) {
@@ -31,20 +34,19 @@ type FalWebhookPayload = {
   request_id?: string
   requestId?: string
   status: string
-  payload?: {
-    images?: Array<{ url?: string }>
-    image?: { url?: string }
-  }
-  output?: {
-    images?: Array<{ url?: string }>
-    image?: { url?: string }
-  }
+  payload?: unknown
+  output?: unknown
   error?: string
 }
 
 function getFalImageUrl(body: FalWebhookPayload): string | null {
   const data = body.payload ?? body.output
-  return data?.images?.[0]?.url ?? data?.image?.url ?? null
+  if (!data || typeof data !== "object") return null
+  const d = data as {
+    images?: Array<{ url?: string }>
+    image?: { url?: string }
+  }
+  return d.images?.[0]?.url ?? d.image?.url ?? null
 }
 
 function patchSceneryState(
@@ -151,11 +153,50 @@ Deno.serve(async (req) => {
           .update({ gen_status: "error" })
           .eq("id", character.id)
       }
+
+      await supabase
+        .from("exports")
+        .update({ status: "error", fal_request_id: null })
+        .eq("fal_request_id", request_id)
+
       await markSceneryError(request_id)
       return Response.json({ ok: true })
     }
 
     if (status !== "OK") return Response.json({ ok: true })
+
+    const { data: exportJob } = await supabase
+      .from("exports")
+      .select("id, status, type")
+      .eq("fal_request_id", request_id)
+      .maybeSingle()
+
+    if (exportJob?.type === "animatic_video") {
+      const videoUrl =
+        extractVideoUrlFromFalData(body.payload ?? body.output) ??
+        extractVideoUrlFromFalData(body)
+
+      if (!videoUrl) {
+        await supabase
+          .from("exports")
+          .update({ status: "error", fal_request_id: null })
+          .eq("id", exportJob.id)
+        return Response.json({ error: "no video url" }, { status: 400 })
+      }
+
+      if (exportJob.status !== "done") {
+        const persisted = await persistExportAnimaticVideo(supabase, exportJob.id, videoUrl)
+        if (!persisted) {
+          await supabase
+            .from("exports")
+            .update({ status: "error", fal_request_id: null })
+            .eq("id", exportJob.id)
+          return Response.json({ error: "persist failed" }, { status: 502 })
+        }
+      }
+
+      return Response.json({ ok: true })
+    }
 
     const imageUrl = getFalImageUrl(body)
     if (!imageUrl) {
