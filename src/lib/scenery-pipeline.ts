@@ -8,10 +8,11 @@ import { uploadCanvasSketchDataUrl } from "@/lib/canvas-sketch-upload";
 import {
   falGenerateSync,
   falQueue,
+  FLUX_TEXT_MODEL,
+  projectStyleConfig,
   SCENERY_FLUX_IMG2IMG_MODEL,
   SCENERY_FLUX_TEXT_MODEL,
 } from "@/lib/fal";
-import { FLUX_TEXT_MODEL } from "@/lib/fal";
 import {
   compositeLandmarksOntoBase,
   fetchImageBuffer,
@@ -162,10 +163,56 @@ export async function runPinCompositeStage(
     landmarkBuffers,
   );
 
+  let finalJpeg = compositeJpeg;
+  let workingCanvasState = canvasState;
+  const harmonizeEnabled =
+    process.env.SCENERY_ENABLE_HARMONIZE === "true" &&
+    Boolean(process.env.FAL_KEY?.trim());
+
+  if (harmonizeEnabled) {
+    await updateProjectSceneryMeta(supabase, projectId, workingCanvasState, {
+      scenery_pipeline_stage: "harmonize",
+    });
+    workingCanvasState = patchCanvasMeta(workingCanvasState, {
+      scenery_pipeline_stage: "harmonize",
+    });
+
+    const preUrl = await uploadFinalBuffer(
+      supabase,
+      projectId,
+      compositeJpeg,
+      "pre-harmonize",
+    );
+    if (preUrl) {
+      const style = projectStyleConfig(options.project);
+      const harmonizePrompt = [
+        "Unify lighting, shadows, and color grading across this entire story map.",
+        "Keep geography and landmark placements unchanged; seamless blending.",
+        `${style.aesthetic_style} look, ${style.theme} tone.`,
+        "No typography or readable labels.",
+      ].join(" ");
+
+      const harmonizedUrl = await falGenerateSync({
+        prompt: harmonizePrompt,
+        model: SCENERY_FLUX_IMG2IMG_MODEL,
+        imageUrl: preUrl,
+        width: 1280,
+        height: 720,
+        strength: 0.38,
+      });
+      const harmonizedBuf = harmonizedUrl
+        ? await fetchImageBuffer(harmonizedUrl)
+        : null;
+      if (harmonizedBuf) {
+        finalJpeg = harmonizedBuf;
+      }
+    }
+  }
+
   const finalUrl = await uploadFinalBuffer(
     supabase,
     projectId,
-    compositeJpeg,
+    finalJpeg,
     "final",
   );
 

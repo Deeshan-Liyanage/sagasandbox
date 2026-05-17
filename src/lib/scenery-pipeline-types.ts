@@ -5,6 +5,7 @@ export type SceneryPipelineStage =
   | "wireframe"
   | "base"
   | "pins"
+  | "harmonize"
   | "complete"
   | "error";
 
@@ -20,6 +21,8 @@ export function pipelineStageLabel(
       return "Generating base map…";
     case "pins":
       return "Placing landmarks…";
+    case "harmonize":
+      return "Harmonizing lighting…";
     case "complete":
       return "Scenery complete";
     case "error":

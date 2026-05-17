@@ -42,7 +42,11 @@ async function pollSceneryPipeline(
 } | null> {
   if (!isTierBPipeline(meta)) return null;
 
-  if (meta.scenery_pipeline_stage === "pins" && meta.scenery_base_map_url) {
+  if (
+    (meta.scenery_pipeline_stage === "pins" ||
+      meta.scenery_pipeline_stage === "harmonize") &&
+    meta.scenery_base_map_url
+  ) {
     const layoutPlan = meta.scenery_layout_plan;
     const geospatial = meta.scenery_pipeline_geospatial;
     if (layoutPlan && geospatial) {

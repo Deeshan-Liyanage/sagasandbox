@@ -1301,11 +1301,20 @@ export const GeographyCanvas = forwardRef<
         toastError(warning);
       }
 
+      const previewResolved = isSceneryPreviewResolved(meta?.scenery_preview_url);
+      const previewFailed = meta?.scenery_preview_url === SCENERY_ERROR;
+
       if (data.queued) {
         toastSuccess(
           data.used_sketch_reference
             ? (data.message ?? "Scenery queued from your map sketch")
             : (data.message ?? "Scenery generation queued (text only)"),
+        );
+      } else if (previewResolved) {
+        toastSuccess(data.message ?? "Scenery synthesis complete");
+      } else if (previewFailed) {
+        toastError(
+          data.message ?? "Scenery generation failed. Try again.",
         );
       } else {
         toastError(

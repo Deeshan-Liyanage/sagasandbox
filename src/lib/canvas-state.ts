@@ -93,6 +93,7 @@ const PIPELINE_STAGES = new Set<string>([
   "wireframe",
   "base",
   "pins",
+  "harmonize",
   "complete",
   "error",
 ]);

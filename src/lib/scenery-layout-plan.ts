@@ -1,5 +1,5 @@
 import { generateObject } from "ai";
-import { openai } from "@ai-sdk/openai";
+import { createOpenAI } from "@ai-sdk/openai";
 import { z } from "zod";
 import { projectStyleConfig } from "@/lib/fal";
 import type { SceneryGeospatialContext } from "@/lib/scenery-prompt";
@@ -154,10 +154,22 @@ export function buildHeuristicLayoutPlan(
   };
 }
 
+function createLayoutPlannerModel() {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey) return null;
+  const baseURL = process.env.OPENAI_BASE_URL?.trim();
+  const provider = createOpenAI({
+    apiKey,
+    ...(baseURL ? { baseURL } : {}),
+  });
+  return provider("gpt-4o-mini");
+}
+
 export async function generateSceneryLayoutPlan(
   input: LayoutPlanInput,
 ): Promise<{ plan: SceneryLayoutPlan; source: "llm" | "heuristic" }> {
-  if (!process.env.OPENAI_API_KEY) {
+  const model = createLayoutPlannerModel();
+  if (!model) {
     return { plan: buildHeuristicLayoutPlan(input), source: "heuristic" };
   }
 
@@ -172,7 +184,7 @@ export async function generateSceneryLayoutPlan(
 
   try {
     const { object } = await generateObject({
-      model: openai("gpt-4o-mini"),
+      model,
       schema: sceneryLayoutPlanSchema,
       prompt: `You are a cartography layout planner for SagaSandbox.
 Produce a JSON layout plan for a 2D top-down story map.
