@@ -413,16 +413,44 @@ export interface MapHelpButtonProps {
 }
 
 /**
- * Tiny help affordance docked at the bottom-right of the map. Replaces the
- * always-on caption with a discoverable, dismissable hint.
+ * Tiny help affordance docked at the top-left of the map. Sits above the
+ * `LocationsPanel` slide-in (which lives along the right edge), so the
+ * hint popover is always reachable. The popover opens downward.
  */
 export function MapHelpButton({ hasSceneryImage }: MapHelpButtonProps) {
   const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!containerRef.current) return;
+      if (!containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
 
   return (
-    <div className="absolute bottom-3 right-3 z-10">
+    <div ref={containerRef} className="absolute left-3 top-3 z-10">
+      <button
+        type="button"
+        aria-label="Map controls help"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className={cn(
+          "inline-flex h-7 w-7 items-center justify-center rounded-full border text-[11px] font-semibold transition",
+          open
+            ? "border-[#7c3aed]/40 bg-[#7c3aed]/15 text-[#c4b5fd]"
+            : "border-[#2a2a30] bg-[#1a1a1e]/80 text-[#9ca3af] hover:text-white",
+        )}
+      >
+        ?
+      </button>
       {open ? (
-        <div className="mb-2 w-72 rounded-lg border border-[#2a2a30] bg-[#141416]/95 p-3 text-[11px] leading-relaxed text-[#9ca3af] shadow-xl backdrop-blur">
+        <div className="absolute left-0 top-full mt-2 w-72 rounded-lg border border-[#2a2a30] bg-[#141416]/95 p-3 text-[11px] leading-relaxed text-[#9ca3af] shadow-xl backdrop-blur">
           <p className="mb-1.5 font-medium text-white">Map controls</p>
           <ul className="space-y-1">
             <li>
@@ -448,20 +476,6 @@ export function MapHelpButton({ hasSceneryImage }: MapHelpButtonProps) {
           ) : null}
         </div>
       ) : null}
-      <button
-        type="button"
-        aria-label="Map controls help"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-        className={cn(
-          "inline-flex h-7 w-7 items-center justify-center rounded-full border text-[11px] font-semibold transition",
-          open
-            ? "border-[#7c3aed]/40 bg-[#7c3aed]/15 text-[#c4b5fd]"
-            : "border-[#2a2a30] bg-[#1a1a1e]/80 text-[#9ca3af] hover:text-white",
-        )}
-      >
-        ?
-      </button>
     </div>
   );
 }
