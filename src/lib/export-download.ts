@@ -1,107 +1,95 @@
 /**
- * Browser-side export downloads. Server resolves filenames + HTTPS URLs via
- * `GET .../exports/:id` (`artifacts`). This module only persists blobs locally.
+ * Browser-side helpers for the Export Terminal. All file bytes are streamed
+ * through the server-side proxy (`/api/projects/{id}/exports/{expId}/download`)
+ * so the browser never deals with expired signed URLs, CORS, or Fal CDN
+ * authentication. This module only constructs the URL and orchestrates clicks.
  */
 
 import type { Export } from "@/types/app";
 
-export type NamedDownloadLink = {
+export type ExportFileDescriptor = {
   filename: string;
-  url: string;
+  contentType: string | null;
 };
 
-function saveBlobAsDownload(blob: Blob, filename: string): void {
-  const objectUrl = URL.createObjectURL(blob);
+export function downloadProxyUrl(
+  projectId: string,
+  exportId: string,
+  index: number,
+): string {
+  return `/api/projects/${encodeURIComponent(projectId)}/exports/${encodeURIComponent(
+    exportId,
+  )}/download?index=${index}`;
+}
+
+export function listFilesUrl(projectId: string, exportId: string): string {
+  return `/api/projects/${encodeURIComponent(projectId)}/exports/${encodeURIComponent(
+    exportId,
+  )}/download?list=1`;
+}
+
+/** Trigger a single anchor click — browsers reliably handle `download` + same-origin URLs. */
+export function downloadViaAnchor(href: string, filename: string): void {
   const anchor = document.createElement("a");
-  anchor.href = objectUrl;
+  anchor.href = href;
   anchor.download = filename;
   anchor.rel = "noopener";
+  anchor.target = "_self";
+  document.body.appendChild(anchor);
   anchor.click();
-  queueMicrotask(() => URL.revokeObjectURL(objectUrl));
+  anchor.remove();
 }
 
-/**
- * Saves a remote asset when possible (`fetch` + blob + object URL).
- * If CORS/network blocks fetch, falls back to opening the URL.
- */
-export async function triggerBrowserDownload(
-  remoteUrl: string,
-  filename: string,
+/** Sequential clicks with a short gap so Chrome/Edge accept multi-file saves. */
+export async function downloadAllProxied(
+  projectId: string,
+  exportId: string,
+  files: ExportFileDescriptor[],
+  delayMs = 450,
 ): Promise<void> {
-  try {
-    const res = await fetch(remoteUrl, { mode: "cors" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const blob = await res.blob();
-    saveBlobAsDownload(blob, filename);
-  } catch {
-    window.open(remoteUrl, "_blank", "noopener,noreferrer");
-  }
-}
-
-/** Saves each artifact with a short delay so browsers accept multiple sequential saves. */
-export async function downloadNamedArtifactsSequential(
-  items: NamedDownloadLink[],
-  delayMs = 380,
-): Promise<void> {
-  if (items.length === 0) return;
-  for (let i = 0; i < items.length; i++) {
-    await triggerBrowserDownload(items[i].url, items[i].filename);
-    if (i < items.length - 1) {
+  for (let i = 0; i < files.length; i++) {
+    downloadViaAnchor(downloadProxyUrl(projectId, exportId, i), files[i].filename);
+    if (i < files.length - 1) {
       await new Promise((r) => setTimeout(r, delayMs));
     }
   }
 }
 
-function extractPathExtension(remoteUrl: string): string | null {
+export type ExportFileLookupResult =
+  | { ok: true; files: ExportFileDescriptor[] }
+  | { ok: false; error: string };
+
+export async function fetchExportFiles(
+  projectId: string,
+  exportId: string,
+): Promise<ExportFileLookupResult> {
   try {
-    const pathname = new URL(remoteUrl).pathname;
-    const base = pathname.split("/").pop() ?? pathname;
-    const beforeQuery = base.split("?")[0] ?? base;
-    const dot = beforeQuery.lastIndexOf(".");
-    if (dot <= 0) return null;
-    return beforeQuery.slice(dot + 1) || null;
-  } catch {
-    const match = /\.([a-zA-Z0-9]+)(?:\?|$)/.exec(remoteUrl);
-    return match?.[1] ?? null;
+    const res = await fetch(listFilesUrl(projectId, exportId));
+    if (!res.ok) {
+      try {
+        const body = (await res.json()) as { error?: string };
+        return {
+          ok: false,
+          error: body.error ?? `Download lookup failed (HTTP ${res.status})`,
+        };
+      } catch {
+        return {
+          ok: false,
+          error: `Download lookup failed (HTTP ${res.status})`,
+        };
+      }
+    }
+    const body = (await res.json()) as { files?: ExportFileDescriptor[] };
+    return { ok: true, files: body.files ?? [] };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Network error",
+    };
   }
 }
 
-/** Animatic jobs may finalize as Luma manifest JSON or an MP4 in storage — infer from URL + MIME. */
-export function inferAnimaticDownloadExtension(
-  remoteUrl: string,
-  contentTypeHeader: string | null | undefined,
-  blobType: string,
-): string {
-  const fromUrl = extractPathExtension(remoteUrl);
-  if (fromUrl) {
-    const e = fromUrl.toLowerCase();
-    if (e === "mp4") return "mp4";
-    if (e === "json") return "json";
-    if (e === "webm") return "webm";
-    if (e === "mov") return "mov";
-  }
-
-  const combined = `${contentTypeHeader ?? ""} ${blobType}`.toLowerCase();
-  if (combined.includes("json")) return "json";
-  if (combined.includes("mp4")) return "mp4";
-  if (combined.includes("webm")) return "webm";
-  if (combined.includes("quicktime") || combined.includes("video/quicktime"))
-    return "mov";
-
-  return "mp4";
-}
-
-export function buildAnimaticArtifactFilename(
-  exp: Export,
-  remoteUrl: string,
-  contentTypeHeader: string | null | undefined,
-  blobType: string,
-): string {
+export function buildAnimaticArtifactFilename(exp: Export): string {
   const short = exp.id.replace(/-/g, "").slice(0, 8);
-  const ext = inferAnimaticDownloadExtension(
-    remoteUrl,
-    contentTypeHeader,
-    blobType,
-  );
-  return `saga-animatic-${short}.${ext}`;
+  return `saga-animatic-${short}.mp4`;
 }

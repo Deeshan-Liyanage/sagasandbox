@@ -4,11 +4,12 @@ import type { Export } from "../../types/app";
 
 import {
   buildAnimaticArtifactFilename,
-  inferAnimaticDownloadExtension,
+  downloadProxyUrl,
+  listFilesUrl,
 } from "./export-download";
 
 const animExp = {
-  id: "aaaaaaaa-bbbb-cccc-ddddeeeeeeee",
+  id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
   project_id: "p",
   type: "animatic_video",
   status: "done",
@@ -18,54 +19,25 @@ const animExp = {
   fal_request_id: null,
 } as unknown as Export;
 
-describe("inferAnimaticDownloadExtension", () => {
-  it("respects pathname when present", () => {
-    expect(
-      inferAnimaticDownloadExtension(
-        "https://example.com/obj/animatic.json?token=abc",
-        "video/mp4",
-        "",
-      ),
-    ).toBe("json");
-
-    expect(
-      inferAnimaticDownloadExtension(
-        "https://example.com/animatic.mp4",
-        "",
-        "",
-      ),
-    ).toBe("mp4");
+describe("buildAnimaticArtifactFilename", () => {
+  it("produces a stable mp4 filename from the export id", () => {
+    const name = buildAnimaticArtifactFilename(animExp);
+    expect(name).toBe("saga-animatic-aaaaaaaa.mp4");
   });
+});
 
-  it("falls back to JSON from MIME when path has no clue", () => {
-    expect(
-      inferAnimaticDownloadExtension(
-        "https://example.com/sign/abcdefg",
-        "application/json; charset=utf-8",
-        "",
-      ),
-    ).toBe("json");
-    expect(inferAnimaticDownloadExtension("", "", "application/json")).toBe(
-      "json",
-    );
-  });
-
-  it("falls back to mp4 last", () => {
-    expect(inferAnimaticDownloadExtension("https://q.test/x", "", "")).toBe(
-      "mp4",
+describe("downloadProxyUrl", () => {
+  it("URI-encodes the project and export ids", () => {
+    expect(downloadProxyUrl("proj 1", "exp/2", 3)).toBe(
+      "/api/projects/proj%201/exports/exp%2F2/download?index=3",
     );
   });
 });
 
-describe("buildAnimaticArtifactFilename", () => {
-  it("pairs short id stem with inferred extension", () => {
-    const name = buildAnimaticArtifactFilename(
-      animExp,
-      "https://host/exports/exp/animatic.json",
-      null,
-      "",
+describe("listFilesUrl", () => {
+  it("targets the same endpoint with ?list=1", () => {
+    expect(listFilesUrl("p", "e")).toBe(
+      "/api/projects/p/exports/e/download?list=1",
     );
-    expect(name.startsWith("saga-animatic-aaaaaaaa")).toBe(true);
-    expect(name.endsWith(".json")).toBe(true);
   });
 });
