@@ -25,7 +25,6 @@ import {
   createSanitizingLayoutStorage,
   horizontalLayoutForVisibility,
   layoutGroupId,
-  layoutPresetFromVisibility,
   verticalLayoutForVisibility,
   type LayoutPresetId,
   type PaneVisibility,
@@ -128,8 +127,6 @@ export function AppShell({
   const horizontalGroupRef = useGroupRef();
   const verticalGroupRef = useGroupRef();
 
-  const layoutPresetSelected = layoutPresetFromVisibility(paneVisibility);
-
   useLayoutEffect(() => {
     vaultPanelRef.current?.[paneVisibility.vault ? "expand" : "collapse"]();
     exportPanelRef.current?.[paneVisibility.export ? "expand" : "collapse"]();
@@ -170,41 +167,19 @@ export function AppShell({
             {theme.replace(/_/g, " ")}
           </span>
         </div>
-        <div className="flex items-center gap-2">
-          <label className="sr-only" htmlFor="workspace-layout-preset">
-            Workspace layout
-          </label>
-          <select
-            id="workspace-layout-preset"
-            value={
-              layoutPresetSelected === "custom"
-                ? "custom"
-                : layoutPresetSelected
-            }
-            onChange={(e) => {
-              const v = e.target.value;
-              if (v === "custom") return;
-              onApplyLayoutPreset(v as LayoutPresetId);
-            }}
-            className="rounded-md border border-[#2a2a2e] bg-[#1a1a1e] px-2 py-1.5 text-xs font-medium text-[#e5e7eb] outline-none hover:border-[#7c3aed]/50 focus-visible:ring-2 focus-visible:ring-[#7c3aed]/40"
-          >
-            <option value="focus-canvas">Focus canvas</option>
-            <option value="balanced">Balanced</option>
-            <option value="full">Full workspace</option>
-            <option value="custom" disabled>
-              Custom (adjust rail icons)
-            </option>
-          </select>
+        <div className="flex items-center gap-1.5">
           {headerActions}
-          <LogoutButton iconOnly />
           <button
             type="button"
             onClick={onExportClick}
-            className="inline-flex items-center gap-2 rounded-md border border-[#2a2a2e] bg-[#1a1a1e] px-3 py-1.5 text-sm font-medium transition hover:border-[#7c3aed] hover:text-white"
+            title="Export project"
+            aria-label="Export project"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#2a2a2e] bg-[#1a1a1e] px-2.5 text-xs font-medium text-[#9ca3af] transition hover:border-[#7c3aed]/50 hover:text-white"
           >
-            <Download className="h-4 w-4" />
+            <Download className="h-3.5 w-3.5" />
             Export
           </button>
+          <LogoutButton iconOnly />
         </div>
       </header>
 
