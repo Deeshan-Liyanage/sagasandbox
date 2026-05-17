@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation"
+import { notFound, redirect } from "next/navigation"
 
 import { WorkspaceClient } from "./WorkspaceClient"
 import {
@@ -9,7 +9,7 @@ import {
   getMockProject,
 } from "@/lib/mock-workspace"
 import { isSupabaseConfigured } from "@/lib/supabase-env"
-import { createAdminClient } from "@/lib/supabase-admin"
+import { createAdminClient, getSupabaseAdminKey } from "@/lib/supabase-admin"
 
 interface ProjectPageProps {
   params: Promise<{ id: string }>
@@ -31,6 +31,10 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
         apiAvailable={false}
       />
     )
+  }
+
+  if (!getSupabaseAdminKey()) {
+    redirect(`/projects/${DEMO_PROJECT_ID}`)
   }
 
   const supabase = createAdminClient()

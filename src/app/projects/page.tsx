@@ -4,10 +4,10 @@ import { redirect } from "next/navigation"
 import { ProjectsHeader } from "@/app/projects/projects-header"
 import { DEMO_PROJECT_ID } from "@/lib/mock-workspace"
 import { isSupabaseConfigured } from "@/lib/supabase-env"
-import { createAdminClient } from "@/lib/supabase-admin"
+import { createAdminClient, getSupabaseAdminKey } from "@/lib/supabase-admin"
 
 export default async function ProjectsPage() {
-  if (!isSupabaseConfigured()) {
+  if (!isSupabaseConfigured() || !getSupabaseAdminKey()) {
     redirect(`/projects/${DEMO_PROJECT_ID}`)
   }
 
