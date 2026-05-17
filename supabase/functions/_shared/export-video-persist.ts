@@ -43,6 +43,7 @@ export async function persistExportAnimaticVideo(
         output_url: signed?.signedUrl ?? path,
         fal_request_id: null,
         status: "done",
+        error_message: null,
       })
       .eq("id", exportId)
 
