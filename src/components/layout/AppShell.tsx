@@ -5,6 +5,7 @@ import {
   Group,
   Panel,
   useDefaultLayout,
+  useGroupRef,
   usePanelRef,
 } from "react-resizable-panels";
 import {
@@ -22,7 +23,10 @@ import { cn } from "@/lib/cn";
 import { themeAccent } from "@/lib/constants";
 import {
   createSanitizingLayoutStorage,
+  horizontalLayoutForVisibility,
   layoutGroupId,
+  layoutPresetFromVisibility,
+  verticalLayoutForVisibility,
   type LayoutPresetId,
   type PaneVisibility,
   type WorkspacePaneId,
@@ -106,27 +110,33 @@ export function AppShell({
   const vaultPanelRef = usePanelRef();
   const exportPanelRef = usePanelRef();
   const timelinePanelRef = usePanelRef();
+  const horizontalGroupRef = useGroupRef();
+  const verticalGroupRef = useGroupRef();
+
+  const layoutPresetSelected = layoutPresetFromVisibility(paneVisibility);
 
   useLayoutEffect(() => {
-    const p = vaultPanelRef.current;
-    if (!p) return;
-    if (paneVisibility.vault) p.expand();
-    else p.collapse();
-  }, [paneVisibility.vault, vaultPanelRef]);
+    vaultPanelRef.current?.[paneVisibility.vault ? "expand" : "collapse"]();
+    exportPanelRef.current?.[paneVisibility.export ? "expand" : "collapse"]();
+    timelinePanelRef.current?.[
+      paneVisibility.timeline ? "expand" : "collapse"
+    ]();
 
-  useLayoutEffect(() => {
-    const p = exportPanelRef.current;
-    if (!p) return;
-    if (paneVisibility.export) p.expand();
-    else p.collapse();
-  }, [paneVisibility.export, exportPanelRef]);
-
-  useLayoutEffect(() => {
-    const p = timelinePanelRef.current;
-    if (!p) return;
-    if (paneVisibility.timeline) p.expand();
-    else p.collapse();
-  }, [paneVisibility.timeline, timelinePanelRef]);
+    horizontalGroupRef.current?.setLayout(
+      horizontalLayoutForVisibility(paneVisibility),
+    );
+    verticalGroupRef.current?.setLayout(
+      verticalLayoutForVisibility(paneVisibility),
+    );
+  }, [
+    projectId,
+    paneVisibility,
+    vaultPanelRef,
+    exportPanelRef,
+    timelinePanelRef,
+    horizontalGroupRef,
+    verticalGroupRef,
+  ]);
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#0e0e0f] text-[#e5e7eb]">
@@ -151,20 +161,24 @@ export function AppShell({
           </label>
           <select
             id="workspace-layout-preset"
-            defaultValue=""
+            value={
+              layoutPresetSelected === "custom"
+                ? "custom"
+                : layoutPresetSelected
+            }
             onChange={(e) => {
-              const v = e.target.value as LayoutPresetId;
-              if (v) onApplyLayoutPreset(v);
-              e.target.value = "";
+              const v = e.target.value;
+              if (v === "custom") return;
+              onApplyLayoutPreset(v as LayoutPresetId);
             }}
             className="rounded-md border border-[#2a2a2e] bg-[#1a1a1e] px-2 py-1.5 text-xs font-medium text-[#e5e7eb] outline-none hover:border-[#7c3aed]/50 focus-visible:ring-2 focus-visible:ring-[#7c3aed]/40"
           >
-            <option value="" disabled>
-              Layout presets
-            </option>
             <option value="focus-canvas">Focus canvas</option>
             <option value="balanced">Balanced</option>
             <option value="full">Full workspace</option>
+            <option value="custom" disabled>
+              Custom (adjust rail icons)
+            </option>
           </select>
           {headerActions}
           <LogoutButton iconOnly />
@@ -212,6 +226,7 @@ export function AppShell({
 
         <Group
           id={layoutGroupId(projectId, "vertical")}
+          groupRef={verticalGroupRef}
           orientation="vertical"
           className="min-h-0 min-w-0 flex-1"
           defaultLayout={verticalLayout.defaultLayout}
@@ -225,6 +240,7 @@ export function AppShell({
           >
             <Group
               id={layoutGroupId(projectId, "horizontal")}
+              groupRef={horizontalGroupRef}
               orientation="horizontal"
               className="h-full min-h-0"
               defaultLayout={horizontalLayout.defaultLayout}
@@ -243,7 +259,10 @@ export function AppShell({
                   {vaultContent}
                 </WorkspacePaneChrome>
               </Panel>
-              <PaneResizeHandle direction="vertical" />
+              <PaneResizeHandle
+                direction="vertical"
+                disabled={!paneVisibility.vault}
+              />
               <Panel
                 id="canvas"
                 className="min-h-0 min-w-0"
@@ -254,7 +273,10 @@ export function AppShell({
                   {canvasContent}
                 </div>
               </Panel>
-              <PaneResizeHandle direction="vertical" />
+              <PaneResizeHandle
+                direction="vertical"
+                disabled={!paneVisibility.export}
+              />
               <Panel
                 id="export"
                 panelRef={exportPanelRef}
@@ -271,7 +293,7 @@ export function AppShell({
             </Group>
           </Panel>
 
-          <PaneResizeHandle direction="horizontal" />
+          <PaneResizeHandle direction="horizontal" disabled={!paneVisibility.timeline} />
 
           <Panel
             id="timeline"

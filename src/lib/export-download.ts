@@ -1,39 +1,55 @@
+/**
+ * Browser-side export downloads. Server resolves filenames + HTTPS URLs via
+ * `GET .../exports/:id` (`artifacts`). This module only persists blobs locally.
+ */
+
 import type { Export } from "@/types/app";
 
-/** Parse narration export `output_url` JSON array into WAV URLs from storage or fal. */
-export function parseAudioExportUrls(
-  outputUrl: string | null | undefined,
-): string[] {
-  if (!outputUrl) return [];
-  try {
-    const parsed = JSON.parse(outputUrl) as unknown;
-    if (Array.isArray(parsed) && parsed.every((x) => typeof x === "string")) {
-      return parsed;
-    }
-  } catch {
-    // output_url may not be JSON — ignored
-  }
-  return [];
+export type NamedDownloadLink = {
+  filename: string;
+  url: string;
+};
+
+function saveBlobAsDownload(blob: Blob, filename: string): void {
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  anchor.rel = "noopener";
+  anchor.click();
+  queueMicrotask(() => URL.revokeObjectURL(objectUrl));
 }
 
-export function resolveExportPrimaryArtifactUrl(
-  type: string,
-  outputUrl: string | null | undefined,
-  signedUrl?: string | null,
-): string | null {
-  const out = outputUrl?.trim() ?? "";
-
-  if (type === "audio_script") {
-    if (!out) return null;
-    const urls = parseAudioExportUrls(out);
-    return urls[0] ?? null;
+/**
+ * Saves a remote asset when possible (`fetch` + blob + object URL).
+ * If CORS/network blocks fetch, falls back to opening the URL.
+ */
+export async function triggerBrowserDownload(
+  remoteUrl: string,
+  filename: string,
+): Promise<void> {
+  try {
+    const res = await fetch(remoteUrl, { mode: "cors" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    saveBlobAsDownload(blob, filename);
+  } catch {
+    window.open(remoteUrl, "_blank", "noopener,noreferrer");
   }
+}
 
-  // Animatic/storyboard: API may return a fresh `signed_url` while `output_url`
-  // is still null (race) or empty — prefer signed link before bailing.
-  if (signedUrl && /^https?:\/\//i.test(signedUrl)) return signedUrl;
-  if (!out) return null;
-  return out;
+/** Saves each artifact with a short delay so browsers accept multiple sequential saves. */
+export async function downloadNamedArtifactsSequential(
+  items: NamedDownloadLink[],
+  delayMs = 380,
+): Promise<void> {
+  if (items.length === 0) return;
+  for (let i = 0; i < items.length; i++) {
+    await triggerBrowserDownload(items[i].url, items[i].filename);
+    if (i < items.length - 1) {
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
 }
 
 function extractPathExtension(remoteUrl: string): string | null {
@@ -88,90 +104,4 @@ export function buildAnimaticArtifactFilename(
     blobType,
   );
   return `saga-animatic-${short}.${ext}`;
-}
-
-/** Stable download names aligned with Export Terminal labels (non-animatic). */
-export function buildExportArtifactFilename(exp: Export): string {
-  const short = exp.id.replace(/-/g, "").slice(0, 8);
-  switch (exp.type) {
-    case "storyboard_pdf":
-      return `saga-storyboard-${short}.json`;
-    case "animatic_video":
-      return `saga-animatic-${short}.mp4`;
-    case "audio_script":
-      return `saga-narration-${short}.wav`;
-    default:
-      return `saga-export-${short}`;
-  }
-}
-
-function saveBlobAsDownload(blob: Blob, filename: string): void {
-  const objectUrl = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = objectUrl;
-  anchor.download = filename;
-  anchor.rel = "noopener";
-  anchor.click();
-  queueMicrotask(() => URL.revokeObjectURL(objectUrl));
-}
-
-/**
- * Saves a remote asset when possible (`fetch` + blob + object URL).
- * If CORS/network blocks fetch, falls back to opening the URL.
- */
-export async function triggerBrowserDownload(
-  remoteUrl: string,
-  filename: string,
-): Promise<void> {
-  try {
-    const res = await fetch(remoteUrl, { mode: "cors" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const blob = await res.blob();
-    saveBlobAsDownload(blob, filename);
-  } catch {
-    window.open(remoteUrl, "_blank", "noopener,noreferrer");
-  }
-}
-
-/** Single-file timeline export download with correct animatic extension from response metadata. */
-export async function triggerExportArtifactDownload(
-  exp: Export,
-  remoteUrl: string,
-): Promise<void> {
-  try {
-    const res = await fetch(remoteUrl, { mode: "cors" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const blob = await res.blob();
-
-    const filename =
-      exp.type === "animatic_video"
-        ? buildAnimaticArtifactFilename(
-            exp,
-            remoteUrl,
-            res.headers.get("content-type"),
-            blob.type,
-          )
-        : buildExportArtifactFilename(exp);
-
-    saveBlobAsDownload(blob, filename);
-  } catch {
-    window.open(remoteUrl, "_blank", "noopener,noreferrer");
-  }
-}
-
-export async function downloadAudioExportArtifacts(
-  exp: Export,
-  urls: string[],
-): Promise<void> {
-  if (urls.length === 0) return;
-  if (urls.length === 1) {
-    await triggerBrowserDownload(urls[0], buildExportArtifactFilename(exp));
-    return;
-  }
-  const short = exp.id.replace(/-/g, "").slice(0, 8);
-  const stem = `saga-narration-${short}`;
-  for (let i = 0; i < urls.length; i++) {
-    await triggerBrowserDownload(urls[i], `${stem}-${i + 1}.wav`);
-    if (i < urls.length - 1) await new Promise((r) => setTimeout(r, 400));
-  }
 }

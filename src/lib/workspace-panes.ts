@@ -66,11 +66,40 @@ export function savePaneVisibility(
   }
 }
 
+export function layoutPresetFromVisibility(
+  pv: PaneVisibility,
+): LayoutPresetId | "custom" {
+  if (!pv.vault && !pv.export && !pv.timeline) return "focus-canvas";
+  if (pv.vault && !pv.export && pv.timeline) return "balanced";
+  if (pv.vault && pv.export && pv.timeline) return "full";
+  return "custom";
+}
+
+/** Canonical flex percentages synced when pane rails open or close (collapse is 0%). */
+export function horizontalLayoutForVisibility(pv: PaneVisibility): {
+  vault: number;
+  canvas: number;
+  export: number;
+} {
+  const { vault: v, export: x } = pv;
+  if (!v && !x) return { vault: 0, canvas: 100, export: 0 };
+  if (v && !x) return { vault: 22, canvas: 78, export: 0 };
+  if (!v && x) return { vault: 0, canvas: 78, export: 22 };
+  return { vault: 16, canvas: 68, export: 16 };
+}
+
+export function verticalLayoutForVisibility(pv: PaneVisibility): {
+  main: number;
+  timeline: number;
+} {
+  return pv.timeline ? { main: 78, timeline: 22 } : { main: 100, timeline: 0 };
+}
+
 export function layoutGroupId(
   projectId: string,
   segment: "horizontal" | "vertical",
 ): string {
-  return `saga-workspace-layout:${projectId}:${segment}`;
+  return `saga-workspace-layout:v3:${projectId}:${segment}`;
 }
 
 const RESIZABLE_PANELS_PREFIX = "react-resizable-panels:";

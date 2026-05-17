@@ -1,65 +1,9 @@
 import { NextResponse } from "next/server";
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { isAuthError, jsonError, requireAuth } from "@/lib/api-auth";
-import {
-  normalizeUuidParam,
-  parseSupabaseStorageObjectRef,
-} from "@/lib/supabase-storage-object-path";
-import type { Database } from "@/types/db";
+import { normalizeUuidParam } from "@/lib/supabase-storage-object-path";
+import { resolveExportArtifacts } from "@/lib/supabase-export-artifacts";
 
 type RouteContext = { params: Promise<{ id: string; expId: string }> };
-
-async function deriveFreshSignedDownloadUrl(
-  supabase: SupabaseClient<Database>,
-  outputUrl: string,
-): Promise<string | undefined> {
-  const out = outputUrl.trim();
-  if (!out) return undefined;
-
-  if (!/^https?:\/\//i.test(out)) {
-    const objectPath = out.replace(/^\/+/, "");
-    const { data: bareSigned } = await supabase.storage
-      .from("exports")
-      .createSignedUrl(objectPath, 3600);
-    return bareSigned?.signedUrl ?? undefined;
-  }
-
-  const ref = parseSupabaseStorageObjectRef(out);
-  if (ref) {
-    const { data: refreshed } = await supabase.storage
-      .from(ref.bucket)
-      .createSignedUrl(ref.objectPath, 3600);
-    return refreshed?.signedUrl ?? undefined;
-  }
-
-  return out;
-}
-
-async function tryConventionalExportSignedUrl(
-  supabase: SupabaseClient<Database>,
-  exportType: string,
-  exportId: string,
-): Promise<string | undefined> {
-  const paths: string[] = [];
-  if (exportType === "animatic_video") {
-    paths.push(
-      `exports/${exportId}/animatic.mp4`,
-      `exports/${exportId}/animatic.json`,
-    );
-  } else if (exportType === "storyboard_pdf") {
-    paths.push(`exports/${exportId}/storyboard.json`);
-  } else {
-    return undefined;
-  }
-
-  for (const objectPath of paths) {
-    const { data } = await supabase.storage
-      .from("exports")
-      .createSignedUrl(objectPath, 3600);
-    if (data?.signedUrl) return data.signedUrl;
-  }
-  return undefined;
-}
 
 export async function GET(_request: Request, context: RouteContext) {
   const auth = await requireAuth();
@@ -95,30 +39,18 @@ export async function GET(_request: Request, context: RouteContext) {
       );
     }
 
-    let signed_url: string | undefined;
+    const artifacts =
+      exportRow.status === "done"
+        ? await resolveExportArtifacts(supabase, exportRow)
+        : [];
 
-    if (exportRow.status === "done") {
-      if (exportRow.output_url && String(exportRow.output_url).trim()) {
-        try {
-          signed_url = await deriveFreshSignedDownloadUrl(
-            supabase,
-            exportRow.output_url as string,
-          );
-        } catch {
-          signed_url = exportRow.output_url as string;
-        }
-      }
+    const signed_url = artifacts[0]?.url;
 
-      if (!signed_url) {
-        signed_url = await tryConventionalExportSignedUrl(
-          supabase,
-          exportRow.type as string,
-          exportRow.id,
-        );
-      }
-    }
-
-    return NextResponse.json({ export: exportRow, signed_url });
+    return NextResponse.json({
+      export: exportRow,
+      signed_url,
+      artifacts,
+    });
   } catch (err) {
     return jsonError(err instanceof Error ? err.message : "Unknown error");
   }

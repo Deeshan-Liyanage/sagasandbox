@@ -5,17 +5,15 @@ import { Download } from "lucide-react";
 import type { Export, ExportType, TimelineEvent } from "@/types/app";
 import { RemoteImage } from "@/components/shared/RemoteImage";
 import {
-  downloadAudioExportArtifacts,
-  parseAudioExportUrls,
-  resolveExportPrimaryArtifactUrl,
-  triggerExportArtifactDownload,
+  type NamedDownloadLink,
+  downloadNamedArtifactsSequential,
 } from "@/lib/export-download";
 import { cn } from "@/lib/cn";
 import {
   PROJECT_API_UNAVAILABLE_MESSAGE,
   readApiError,
 } from "@/lib/project-api";
-import { toastError } from "@/store/toast-store";
+import { toastError, toastSuccess } from "@/store/toast-store";
 
 interface ExportTerminalProps {
   projectId: string;
@@ -194,6 +192,7 @@ export function ExportTerminal({
         const data = (await res.json()) as {
           export: Export;
           signed_url?: string;
+          artifacts?: NamedDownloadLink[];
         };
         setExportStatus(data.export.status);
         onExportUpdate?.(data.export);
@@ -226,26 +225,26 @@ export function ExportTerminal({
       const data = (await res.json()) as {
         export: Export;
         signed_url?: string;
+        artifacts?: NamedDownloadLink[];
       };
       const exp = data.export;
       if (exp.status !== "done") return;
 
-      const audioUrls = parseAudioExportUrls(exp.output_url);
-      if (exp.type === "audio_script" && audioUrls.length > 0) {
-        await downloadAudioExportArtifacts(exp, audioUrls);
-        return;
-      }
-
-      const primary = resolveExportPrimaryArtifactUrl(
-        exp.type,
-        exp.output_url,
-        data.signed_url,
+      const artifacts = (data.artifacts ?? []).filter(
+        (a) => a?.url?.trim() && a?.filename?.trim(),
       );
-      if (!primary) {
-        toastError("Export has no downloadable asset yet.");
+      if (artifacts.length === 0) {
+        toastError(
+          "This export finished but no files were resolved. Try Refresh or regenerate the export.",
+        );
         return;
       }
-      await triggerExportArtifactDownload(exp, primary);
+      await downloadNamedArtifactsSequential(artifacts);
+      toastSuccess(
+        artifacts.length === 1
+          ? `Saved "${artifacts[0].filename}".`
+          : `Saved ${artifacts.length} files to your Downloads folder.`,
+      );
     } catch (e) {
       toastError(e instanceof Error ? e.message : "Download failed");
     } finally {
@@ -346,7 +345,7 @@ export function ExportTerminal({
             className="inline-flex items-center justify-center gap-2 rounded-lg border border-[#2a2a2e] py-2 text-sm text-white hover:border-[#7c3aed] disabled:opacity-50"
           >
             <Download className="h-4 w-4" />
-            Download latest export
+            Download export files
           </button>
         ) : null}
       </div>
