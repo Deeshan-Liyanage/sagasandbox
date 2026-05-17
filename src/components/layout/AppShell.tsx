@@ -28,11 +28,17 @@ import {
   type WorkspacePaneId,
 } from "@/lib/workspace-panes";
 
-function safeLayoutStorage(): Pick<Storage, "getItem" | "setItem"> {
+type LayoutPersistence = Pick<
+  Storage,
+  "getItem" | "setItem" | "removeItem"
+>;
+
+function safeLayoutStorage(): LayoutPersistence {
   if (typeof window === "undefined") {
     return {
       getItem: () => null,
       setItem: () => {},
+      removeItem: () => {},
     };
   }
   return localStorage;

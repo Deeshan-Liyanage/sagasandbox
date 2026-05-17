@@ -310,6 +310,7 @@ export function WorkspaceClient({
           userId={userId}
           apiAvailable={apiAvailable}
           highlightedPinId={highlightedPinId}
+          sidebarSelectedPinId={selectedPin?.id ?? null}
           initialCanvasState={initialCanvasState}
           loading={canvasHydrating}
           onHydrated={() => setCanvasHydrating(false)}
@@ -334,6 +335,7 @@ export function WorkspaceClient({
       handleCanvasChange,
       setSelectedPin,
       setSidebarMode,
+      selectedPin,
     ],
   );
 
