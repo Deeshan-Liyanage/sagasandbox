@@ -8,7 +8,6 @@ import { ProjectSettingsModal } from "@/components/layout/ProjectSettingsModal";
 import { HistorySidebar } from "@/components/history/HistorySidebar";
 import { CopilotPanel } from "@/components/copilot/CopilotPanel";
 import { CharacterVault } from "@/components/vault/CharacterVault";
-import { PinSidebar } from "@/components/canvas/PinSidebar";
 import { ExportTerminal } from "@/components/export/ExportTerminal";
 import { TimelineStrip } from "@/components/timeline/TimelineStrip";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
@@ -101,7 +100,6 @@ export function WorkspaceClient({
   const {
     selectedPin,
     setSelectedPin,
-    sidebarMode,
     setSidebarMode,
     setActiveEvent,
   } = useUIStore();
@@ -284,6 +282,11 @@ export function WorkspaceClient({
     );
   }, [panelsBooting, project.id, events, apiAvailable, liveExport]);
 
+  const handleCloseSelectedPin = useCallback(() => {
+    setSelectedPin(null);
+    setSidebarMode(null);
+  }, [setSelectedPin, setSidebarMode]);
+
   const canvasContent = useMemo(
     () => (
       <ErrorBoundary>
@@ -319,6 +322,12 @@ export function WorkspaceClient({
             setSelectedPin(pin);
             setSidebarMode("pin");
           }}
+          onSelectedPinUpdated={handlePinUpdate}
+          onSelectedPinDeleted={(pinId) => {
+            setPins((prev) => prev.filter((p) => p.id !== pinId));
+            setSelectedPin(null);
+          }}
+          onCloseSelectedPin={handleCloseSelectedPin}
           onCanvasChange={handleCanvasChange}
         />
       </ErrorBoundary>
@@ -333,6 +342,8 @@ export function WorkspaceClient({
       initialCanvasState,
       canvasHydrating,
       handleCanvasChange,
+      handlePinUpdate,
+      handleCloseSelectedPin,
       setSelectedPin,
       setSidebarMode,
       selectedPin,
@@ -414,24 +425,6 @@ export function WorkspaceClient({
         }
         onExportClick={openExportPane}
       />
-
-      {sidebarMode === "pin" && selectedPin ? (
-        <PinSidebar
-          key={selectedPin.id}
-          pin={selectedPin}
-          projectId={project.id}
-          apiAvailable={apiAvailable}
-          onClose={() => {
-            setSelectedPin(null);
-            setSidebarMode(null);
-          }}
-          onPinUpdated={handlePinUpdate}
-          onPinDeleted={(pinId) => {
-            setPins((prev) => prev.filter((p) => p.id !== pinId));
-            setSelectedPin(null);
-          }}
-        />
-      ) : null}
 
       <ProjectSettingsModal
         project={projectState}

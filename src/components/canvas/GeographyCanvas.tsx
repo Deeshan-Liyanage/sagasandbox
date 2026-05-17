@@ -47,7 +47,6 @@ import {
   SCENERY_PENDING,
   SCENERY_SYNTHESIS_TIMEOUT_MS,
 } from "@/lib/scenery-synthesis";
-import { cn } from "@/lib/cn";
 import { exportMapSketchToDataUrl } from "@/lib/canvas-sketch-export";
 import { alignedSceneryTransformForGeospatial } from "@/lib/scenery-coords";
 import { buildGeospatialContext } from "@/lib/scenery-geospatial";
@@ -60,13 +59,17 @@ import { readApiError } from "@/lib/project-api";
 import { toastError, toastSuccess } from "@/store/toast-store";
 import { useCanvasAdvancedMode } from "@/hooks/useCanvasAdvancedMode";
 import { PinCreator } from "./PinCreator";
-import { MapPinsList } from "./MapPinsList";
+import { LocationsPanel } from "./LocationsPanel";
+import {
+  MapFloatingActions,
+  MapHelpButton,
+  MapToolPalette,
+  type MapExportVariant,
+} from "./MapToolbar";
+import type { CanvasTool } from "./canvas-tool";
 import { SceneryPromptPreviewModal } from "./SceneryPromptPreviewModal";
 
-type MapExportVariant = "clean" | "overlay";
-
-/** Map = draw + pins + gestures; Eraser / Scenery are optional overlays. */
-export type CanvasTool = "map" | "eraser" | "scenery";
+export type { CanvasTool };
 
 export interface GeographyCanvasProps {
   projectId: string;
@@ -82,6 +85,12 @@ export interface GeographyCanvasProps {
   highlightedPinId?: string | null;
   /** Selected pin shown in map sidebar (vs timeline-only highlight). */
   sidebarSelectedPinId?: string | null;
+  /** Notifies parent when the integrated locations panel updates a pin. */
+  onSelectedPinUpdated?: (pin: LocationPin) => void;
+  /** Notifies parent when the integrated locations panel deletes a pin. */
+  onSelectedPinDeleted?: (pinId: string) => void;
+  /** Closes the parent's selected-pin state when the panel back/close fires. */
+  onCloseSelectedPin?: () => void;
 }
 
 export interface GeographyCanvasHandle {
@@ -187,6 +196,9 @@ export const GeographyCanvas = forwardRef<
     apiAvailable = true,
     highlightedPinId = null,
     sidebarSelectedPinId = null,
+    onSelectedPinUpdated,
+    onSelectedPinDeleted,
+    onCloseSelectedPin,
   },
   ref,
 ) {
@@ -251,6 +263,7 @@ export const GeographyCanvas = forwardRef<
   const [promptPreviewWarnings, setPromptPreviewWarnings] = useState<string[]>(
     [],
   );
+  const [locationsOpen, setLocationsOpen] = useState(false);
   const [promptPreviewLayoutPlan, setPromptPreviewLayoutPlan] =
     useState<SceneryLayoutPlan | null>(null);
   const [promptPreviewWireframe, setPromptPreviewWireframe] = useState<
@@ -592,6 +605,14 @@ export const GeographyCanvas = forwardRef<
     hydratedStateKeyRef.current = stateKey;
     hydrateFromState(initialCanvasState);
   }, [initialCanvasState, hydrateFromState]);
+
+  // Auto-open the integrated locations panel whenever a pin is selected
+  // (from clicking a pin, the timeline strip, etc.) so the detail view is reachable.
+  useEffect(() => {
+    if (sidebarSelectedPinId) {
+      setLocationsOpen(true);
+    }
+  }, [sidebarSelectedPinId]);
 
   useEffect(() => {
     if (sceneryTransform) {
@@ -1502,130 +1523,66 @@ export const GeographyCanvas = forwardRef<
     handleSynthesizeScenery,
   ]);
 
-  const toolbar = useMemo(
-    () => (
-      <div className="absolute bottom-4 left-1/2 z-10 flex max-w-[95vw] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-lg border border-[#2a2a2e] bg-[#1a1a1e]/95 px-2 py-1 shadow-lg backdrop-blur">
-        <span className="rounded-md bg-[#7c3aed] px-2.5 py-1 text-xs font-medium text-white">
-          Map
-        </span>
-        <button
-          type="button"
-          onClick={() => setTool(tool === "eraser" ? "map" : "eraser")}
-          className={cn(
-            "rounded-md px-3 py-1.5 text-xs font-medium",
-            tool === "eraser"
-              ? "bg-[#7c3aed] text-white"
-              : "text-[#9ca3af] hover:text-white",
-          )}
-        >
-          Eraser
-        </button>
-        {hasSceneryImage ? (
-          <button
-            type="button"
-            onClick={() => setTool(tool === "scenery" ? "map" : "scenery")}
-            className={cn(
-              "rounded-md px-3 py-1.5 text-xs font-medium",
-              tool === "scenery"
-                ? "bg-[#7c3aed] text-white"
-                : "text-[#9ca3af] hover:text-white",
-            )}
-          >
-            Scenery
-          </button>
-        ) : null}
-        <details className="group relative shrink-0">
-          <summary
-            className="cursor-pointer select-none rounded-md px-3 py-1.5 text-xs font-medium text-[#a78bfa] hover:bg-[#7c3aed]/20 [&::-webkit-details-marker]:hidden"
-            title="Download the visible map viewport as PNG"
-          >
-            Export map ▾
-          </summary>
-          <div className="absolute bottom-full left-1/2 z-20 mb-1 flex min-w-[220px] -translate-x-1/2 flex-col gap-px rounded-md border border-[#2a2a2e] bg-[#141418] py-1 shadow-xl">
-            <button
-              type="button"
-              className="px-3 py-2 text-left text-[11px] text-[#e5e7eb] hover:bg-[#2a2a2e]"
-              onClick={() => exportMapToPng("clean")}
-            >
-              PNG — scenery only{" "}
-              <span className="mt-0.5 block font-normal text-[#9ca3af]">
-                Hides violet strokes and pins; shows generated backdrop at full
-                strength (same camera & zoom).
-              </span>
-            </button>
-            <button
-              type="button"
-              className="px-3 py-2 text-left text-[11px] text-[#e5e7eb] hover:bg-[#2a2a2e]"
-              onClick={() => exportMapToPng("overlay")}
-            >
-              PNG — pins & sketches
-              <span className="mt-0.5 block font-normal text-[#9ca3af]">
-                Includes pins and brush strokes; backdrop at full overlay
-                strength (same camera & zoom).
-              </span>
-            </button>
-          </div>
-        </details>
-        {apiAvailable ? (
-          <>
-            <input
-              type="text"
-              value={synthesisUserNotes}
-              onChange={(e) => setSynthesisUserNotes(e.target.value)}
-              onBlur={() => persistSynthesisNotes(synthesisUserNotes)}
-              onKeyDown={(e) => e.stopPropagation()}
-              placeholder="Extra instructions (2D, watercolor…)"
-              disabled={synthesizing}
-              aria-label="Scenery synthesis instructions"
-              className={cn(
-                "w-36 min-w-0 rounded-md border border-[#2a2a2e] bg-[#0f0f12] px-2 py-1 text-xs text-[#e5e7eb] placeholder:text-[#6b7280] sm:w-48",
-                synthesizing && "cursor-not-allowed opacity-60",
-              )}
-            />
-            <button
-              type="button"
-              disabled={synthesizing || promptPreviewLoading}
-              onClick={() => void handleSynthesizeClick()}
-              className={cn(
-                "rounded-md px-3 py-1.5 text-xs font-medium text-[#a78bfa] hover:bg-[#7c3aed]/20",
-                (synthesizing || promptPreviewLoading) &&
-                  "cursor-wait opacity-60",
-              )}
-            >
-              {synthesizing
-                ? "Synthesizing…"
-                : promptPreviewLoading
-                  ? "Loading…"
-                  : "Synthesize"}
-            </button>
-            <span className="mx-0.5 h-5 w-px bg-[#2a2a2e]" aria-hidden />
-            <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-xs text-[#9ca3af] hover:text-[#e5e7eb]">
-              <input
-                type="checkbox"
-                checked={advancedMode}
-                onChange={toggleAdvancedMode}
-                disabled={synthesizing}
-                className="h-3.5 w-3.5 rounded border-[#2a2a2e] bg-[#0f0f12] text-[#7c3aed] focus:ring-[#7c3aed]/40"
-              />
-              Advanced
-            </label>
-          </>
-        ) : null}
-      </div>
-    ),
-    [
-      tool,
-      hasSceneryImage,
-      apiAvailable,
-      synthesizing,
-      synthesisUserNotes,
-      persistSynthesisNotes,
-      handleSynthesizeClick,
-      promptPreviewLoading,
-      advancedMode,
-      toggleAdvancedMode,
-      exportMapToPng,
-    ],
+  const selectedPinForPanel = useMemo<LocationPin | null>(() => {
+    if (!sidebarSelectedPinId) return null;
+    return pins.find((p) => p.id === sidebarSelectedPinId) ?? null;
+  }, [pins, sidebarSelectedPinId]);
+
+  const handleNotesChange = useCallback((next: string) => {
+    setSynthesisUserNotes(next);
+  }, []);
+  const handlePersistNotes = useCallback(() => {
+    persistSynthesisNotes(synthesisUserNotes);
+  }, [persistSynthesisNotes, synthesisUserNotes]);
+
+  const handleSynthesizeAction = useCallback(() => {
+    void handleSynthesizeClick();
+  }, [handleSynthesizeClick]);
+
+  const handleToggleLocations = useCallback(() => {
+    setLocationsOpen((prev) => {
+      if (prev && sidebarSelectedPinId) {
+        // Closing while a pin is selected should clear that selection so the
+        // panel reopens to the list rather than the (now-stale) detail view.
+        onCloseSelectedPin?.();
+      }
+      return !prev;
+    });
+  }, [onCloseSelectedPin, sidebarSelectedPinId]);
+
+  const handleCloseLocations = useCallback(() => {
+    setLocationsOpen(false);
+    if (sidebarSelectedPinId) {
+      onCloseSelectedPin?.();
+    }
+  }, [onCloseSelectedPin, sidebarSelectedPinId]);
+
+  const handleBackToLocationsList = useCallback(() => {
+    onCloseSelectedPin?.();
+  }, [onCloseSelectedPin]);
+
+  const handlePanelPinUpdated = useCallback(
+    (pin: LocationPin) => {
+      onPinsChange((prev) => prev.map((p) => (p.id === pin.id ? pin : p)));
+      onSelectedPinUpdated?.(pin);
+    },
+    [onPinsChange, onSelectedPinUpdated],
+  );
+
+  const handlePanelPinDeleted = useCallback(
+    (pinId: string) => {
+      onPinsChange((prev) => prev.filter((p) => p.id !== pinId));
+      onSelectedPinDeleted?.(pinId);
+      onCloseSelectedPin?.();
+    },
+    [onPinsChange, onSelectedPinDeleted, onCloseSelectedPin],
+  );
+
+  const handlePanelPinSelect = useCallback(
+    (pin: LocationPin) => {
+      onPinSelect(pin);
+    },
+    [onPinSelect],
   );
 
   return (
@@ -1665,28 +1622,44 @@ export const GeographyCanvas = forwardRef<
           />
         ) : null}
         {sceneryPreviewUrl === SCENERY_PENDING ? (
-          <div className="pointer-events-none absolute inset-x-4 top-4 z-[2] rounded-md border border-[#7c3aed]/40 bg-[#7c3aed]/15 px-3 py-2 text-center text-xs text-[#e5e7eb]">
+          <div className="pointer-events-none absolute left-1/2 top-16 z-[2] -translate-x-1/2 rounded-full border border-[#7c3aed]/40 bg-[#7c3aed]/15 px-3 py-1 text-[11px] text-[#e5e7eb] shadow-lg">
             <span className="inline-block animate-pulse">
               {pipelineStageLabel(sceneryPipelineStage)}
             </span>
           </div>
         ) : null}
-        {tool === "map" ? (
-          <p className="pointer-events-none absolute inset-x-4 bottom-20 z-[2] text-center text-[10px] text-[#6b7280]">
-            Drag to draw · Click empty map to add pin · Hold Space, Alt, or Shift
-            and drag to pan · Middle / right mouse drag to pan
-            {hasSceneryImage ? (
-              <span className="block text-[#5b6577]">
-                Sketch stroke overlay is dimmed while scenery is visible; pins stay
-                aligned to the map when Tier&nbsp;B geospatial data is present.
-              </span>
-            ) : null}
-          </p>
-        ) : null}
-        {toolbar}
-        {pins.length === 0 && !pinCreator && tool === "map" ? (
-          <p className="pointer-events-none absolute inset-0 z-[1] flex items-center justify-center text-sm text-[#9ca3af]">
-            Click the map to add a location
+
+        <MapToolPalette
+          tool={tool}
+          hasSceneryImage={hasSceneryImage}
+          onToolChange={setTool}
+        />
+
+        <MapFloatingActions
+          apiAvailable={apiAvailable}
+          pinCount={pins.length}
+          locationsOpen={locationsOpen}
+          onToggleLocations={handleToggleLocations}
+          onExport={exportMapToPng}
+          onSynthesize={handleSynthesizeAction}
+          synthesizing={synthesizing}
+          promptPreviewLoading={promptPreviewLoading}
+          notes={synthesisUserNotes}
+          onNotesChange={handleNotesChange}
+          onPersistNotes={handlePersistNotes}
+          advancedMode={advancedMode}
+          onToggleAdvanced={toggleAdvancedMode}
+          hasSceneryImage={hasSceneryImage}
+        />
+
+        <MapHelpButton hasSceneryImage={hasSceneryImage} />
+
+        {pins.length === 0 &&
+        lines.length === 0 &&
+        !pinCreator &&
+        tool === "map" ? (
+          <p className="pointer-events-none absolute inset-x-0 top-1/2 z-[1] -translate-y-1/2 text-center text-sm text-[#5b6270]">
+            Click anywhere to drop a pin · drag to draw
           </p>
         ) : null}
 
@@ -1860,14 +1833,24 @@ export const GeographyCanvas = forwardRef<
             onCancel={() => setPinCreator(null)}
           />
         ) : null}
+
+        <LocationsPanel
+          open={locationsOpen}
+          pins={pins}
+          projectId={projectId}
+          apiAvailable={apiAvailable}
+          selectedPin={selectedPinForPanel}
+          highlightedPinId={
+            sidebarSelectedPinId ?? highlightedPinId ?? null
+          }
+          onClose={handleCloseLocations}
+          onPinSelect={handlePanelPinSelect}
+          onFocusPin={focusPinOnViewport}
+          onPinUpdated={handlePanelPinUpdated}
+          onPinDeleted={handlePanelPinDeleted}
+          onCloseSelectedPin={handleBackToLocationsList}
+        />
       </div>
-      <MapPinsList
-        pins={pins}
-        highlightedPinId={highlightedPinId ?? undefined}
-        activePinId={sidebarSelectedPinId ?? undefined}
-        onPinSelect={onPinSelect}
-        onFocusPin={focusPinOnViewport}
-      />
     </div>
   );
 });
