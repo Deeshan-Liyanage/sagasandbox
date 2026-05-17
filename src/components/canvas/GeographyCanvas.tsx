@@ -53,6 +53,7 @@ import { buildGeospatialContext } from "@/lib/scenery-geospatial";
 import { readApiError } from "@/lib/project-api";
 import { toastError, toastSuccess } from "@/store/toast-store";
 import { PinCreator } from "./PinCreator";
+import { SceneryPromptPreviewModal } from "./SceneryPromptPreviewModal";
 
 /** Map = draw + pins + gestures; Eraser / Scenery are optional overlays. */
 export type CanvasTool = "map" | "eraser" | "scenery";
@@ -215,6 +216,14 @@ export const GeographyCanvas = forwardRef<
     y: number;
   } | null>(null);
   const [synthesizing, setSynthesizing] = useState(false);
+  const [promptPreviewOpen, setPromptPreviewOpen] = useState(false);
+  const [promptPreviewLoading, setPromptPreviewLoading] = useState(false);
+  const [promptPreviewText, setPromptPreviewText] = useState<string | null>(
+    null,
+  );
+  const [promptPreviewWarnings, setPromptPreviewWarnings] = useState<string[]>(
+    [],
+  );
   const [synthesisUserNotes, setSynthesisUserNotes] = useState("");
   const [sceneryPreviewUrl, setSceneryPreviewUrl] = useState<string | null>(
     null,
@@ -1068,9 +1077,7 @@ export const GeographyCanvas = forwardRef<
     [onPinsChange],
   );
 
-  const handleSynthesizeScenery = useCallback(async () => {
-    if (!apiAvailable || synthesizing) return;
-
+  const buildSynthesisRequestBody = useCallback(() => {
     const hasStrokes = lines.length > 0;
     const sketchDataUrl = hasStrokes
       ? exportMapSketchToDataUrl(
@@ -1083,15 +1090,7 @@ export const GeographyCanvas = forwardRef<
         )
       : null;
 
-    if (!hasStrokes) {
-      toastError(
-        "No strokes on the map — synthesis will use theme and pin names only.",
-      );
-    }
-
     const notes = synthesisUserNotes.trim();
-    persistSynthesisNotes(notes);
-
     const geospatial = buildGeospatialContext(
       lines,
       pins.map((p) => ({
@@ -1104,6 +1103,101 @@ export const GeographyCanvas = forwardRef<
       size.height,
     );
 
+    return {
+      hasStrokes,
+      sketchDataUrl,
+      notes,
+      body: {
+        sketch_data_url: sketchDataUrl ?? undefined,
+        has_strokes: hasStrokes,
+        synthesis_user_notes: notes.length > 0 ? notes : null,
+        geospatial,
+      },
+    };
+  }, [
+    lines,
+    pins,
+    size.width,
+    size.height,
+    synthesisUserNotes,
+  ]);
+
+  const handleOpenSynthesisPreview = useCallback(async () => {
+    if (!apiAvailable || synthesizing || promptPreviewLoading) return;
+
+    const { hasStrokes, notes, body } = buildSynthesisRequestBody();
+
+    if (!hasStrokes) {
+      toastError(
+        "No strokes on the map — synthesis will use theme and pin names only.",
+      );
+    }
+
+    persistSynthesisNotes(notes);
+    setPromptPreviewOpen(true);
+    setPromptPreviewLoading(true);
+    setPromptPreviewText(null);
+    setPromptPreviewWarnings([]);
+
+    try {
+      const res = await fetch(
+        `/api/projects/${projectId}/canvas/synthesize/preview`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
+
+      const data = (await res.json()) as {
+        prompt?: string;
+        warnings?: string[];
+        error?: string;
+      };
+
+      if (!res.ok) {
+        throw new Error(data.error ?? "Failed to load prompt preview");
+      }
+
+      setPromptPreviewText(data.prompt ?? "");
+      setPromptPreviewWarnings(data.warnings ?? []);
+    } catch (err) {
+      setPromptPreviewOpen(false);
+      toastError(
+        err instanceof Error ? err.message : "Failed to load prompt preview",
+      );
+    } finally {
+      setPromptPreviewLoading(false);
+    }
+  }, [
+    apiAvailable,
+    synthesizing,
+    promptPreviewLoading,
+    buildSynthesisRequestBody,
+    persistSynthesisNotes,
+    projectId,
+  ]);
+
+  const handleCloseSynthesisPreview = useCallback(() => {
+    if (synthesizing) return;
+    setPromptPreviewOpen(false);
+    setPromptPreviewText(null);
+    setPromptPreviewWarnings([]);
+  }, [synthesizing]);
+
+  const handleSynthesizeScenery = useCallback(async () => {
+    if (!apiAvailable || synthesizing) return;
+
+    const { hasStrokes, notes, body } = buildSynthesisRequestBody();
+
+    if (!hasStrokes) {
+      toastError(
+        "No strokes on the map — synthesis will use theme and pin names only.",
+      );
+    }
+
+    persistSynthesisNotes(notes);
+
     setSynthesizing(true);
     try {
       const res = await fetch(
@@ -1111,12 +1205,7 @@ export const GeographyCanvas = forwardRef<
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sketch_data_url: sketchDataUrl ?? undefined,
-            has_strokes: hasStrokes,
-            synthesis_user_notes: notes.length > 0 ? notes : null,
-            geospatial,
-          }),
+          body: JSON.stringify(body),
         },
       );
 
@@ -1178,13 +1267,17 @@ export const GeographyCanvas = forwardRef<
     apiAvailable,
     synthesizing,
     projectId,
-    lines,
-    pins,
-    size.width,
-    size.height,
-    synthesisUserNotes,
+    buildSynthesisRequestBody,
     persistSynthesisNotes,
   ]);
+
+  const handleConfirmSynthesisFromPreview = useCallback(() => {
+    void handleSynthesizeScenery().finally(() => {
+      setPromptPreviewOpen(false);
+      setPromptPreviewText(null);
+      setPromptPreviewWarnings([]);
+    });
+  }, [handleSynthesizeScenery]);
 
   const toolbar = useMemo(
     () => (
@@ -1234,16 +1327,21 @@ export const GeographyCanvas = forwardRef<
               )}
             />
             <button
-            type="button"
-            disabled={synthesizing}
-            onClick={() => void handleSynthesizeScenery()}
-            className={cn(
-              "rounded-md px-3 py-1.5 text-xs font-medium text-[#a78bfa] hover:bg-[#7c3aed]/20",
-              synthesizing && "cursor-wait opacity-60",
-            )}
-          >
-            {synthesizing ? "Synthesizing…" : "Synthesize"}
-          </button>
+              type="button"
+              disabled={synthesizing || promptPreviewLoading}
+              onClick={() => void handleOpenSynthesisPreview()}
+              className={cn(
+                "rounded-md px-3 py-1.5 text-xs font-medium text-[#a78bfa] hover:bg-[#7c3aed]/20",
+                (synthesizing || promptPreviewLoading) &&
+                  "cursor-wait opacity-60",
+              )}
+            >
+              {synthesizing
+                ? "Synthesizing…"
+                : promptPreviewLoading
+                  ? "Loading…"
+                  : "Synthesize"}
+            </button>
           </>
         ) : null}
       </div>
@@ -1255,7 +1353,8 @@ export const GeographyCanvas = forwardRef<
       synthesizing,
       synthesisUserNotes,
       persistSynthesisNotes,
-      handleSynthesizeScenery,
+      handleOpenSynthesisPreview,
+      promptPreviewLoading,
     ],
   );
 
@@ -1266,6 +1365,15 @@ export const GeographyCanvas = forwardRef<
       className="relative h-full w-full overflow-hidden bg-[#0e0e0f] outline-none"
       onPointerDown={() => containerRef.current?.focus({ preventScroll: true })}
     >
+      <SceneryPromptPreviewModal
+        open={promptPreviewOpen}
+        loading={promptPreviewLoading}
+        prompt={promptPreviewText}
+        warnings={promptPreviewWarnings}
+        confirming={synthesizing}
+        onClose={handleCloseSynthesisPreview}
+        onConfirm={() => void handleConfirmSynthesisFromPreview()}
+      />
       {loading ? (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#0e0e0f]/80">
           <div className="h-48 w-full max-w-md animate-pulse rounded-lg bg-[#1a1a1e]" />
