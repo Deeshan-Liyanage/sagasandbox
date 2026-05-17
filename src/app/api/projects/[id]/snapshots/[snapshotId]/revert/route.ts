@@ -51,8 +51,9 @@ export async function POST(_request: Request, context: RouteContext) {
     if (state.pins?.length) {
       await supabase.from("location_pins").insert(
         state.pins.map((p) => {
-          const { id, project_id, ...row } = p;
-          return { ...row, id, project_id: projectId };
+          const row = { ...(p as Record<string, unknown>) };
+          delete row.project_id;
+          return { ...row, project_id: projectId };
         }) as never,
       );
     }
@@ -60,7 +61,8 @@ export async function POST(_request: Request, context: RouteContext) {
     if (state.events?.length) {
       await supabase.from("timeline_events").insert(
         state.events.map((e) => {
-          const { project_id, ...row } = e;
+          const row = { ...(e as Record<string, unknown>) };
+          delete row.project_id;
           return { ...row, project_id: projectId };
         }) as never,
       );
@@ -69,7 +71,8 @@ export async function POST(_request: Request, context: RouteContext) {
     if (state.characters?.length) {
       await supabase.from("characters").insert(
         state.characters.map((c) => {
-          const { project_id, ...row } = c;
+          const row = { ...(c as Record<string, unknown>) };
+          delete row.project_id;
           return { ...row, project_id: projectId };
         }) as never,
       );

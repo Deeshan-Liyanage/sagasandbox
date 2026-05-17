@@ -214,7 +214,6 @@ export const GeographyCanvas = forwardRef<
 
   const [size, setSize] = useState({ width: 800, height: 600 });
   const [tool, setTool] = useState<CanvasTool>("map");
-  const [spaceHeld, setSpaceHeld] = useState(false);
   /** Drives pin draggable off while Space / Alt / Shift pan modifiers are held. */
   const [panModifierHeld, setPanModifierHeld] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
@@ -789,7 +788,6 @@ export const GeographyCanvas = forwardRef<
           e.preventDefault();
         }
         spaceHeldRef.current = true;
-        setSpaceHeld(true);
         syncPanModifierHeld();
       }
       if (e.key === "Alt") {
@@ -804,7 +802,6 @@ export const GeographyCanvas = forwardRef<
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.code === "Space") {
         spaceHeldRef.current = false;
-        setSpaceHeld(false);
         syncPanModifierHeld();
         endPanSession();
       }
@@ -965,7 +962,15 @@ export const GeographyCanvas = forwardRef<
 
       broadcastCursor(point);
     },
-    [tool, drawing, currentLineId, getStagePoint, eraseAtPoint, broadcastCursor],
+    [
+      tool,
+      drawing,
+      erasing,
+      currentLineId,
+      getStagePoint,
+      eraseAtPoint,
+      broadcastCursor,
+    ],
   );
 
   const handlePointerUp = useCallback(
