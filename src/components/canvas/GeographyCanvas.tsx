@@ -52,6 +52,7 @@ import { exportMapSketchToDataUrl } from "@/lib/canvas-sketch-export";
 import { buildGeospatialContext } from "@/lib/scenery-geospatial";
 import { readApiError } from "@/lib/project-api";
 import { toastError, toastSuccess } from "@/store/toast-store";
+import { useCanvasAdvancedMode } from "@/hooks/useCanvasAdvancedMode";
 import { PinCreator } from "./PinCreator";
 import { SceneryPromptPreviewModal } from "./SceneryPromptPreviewModal";
 
@@ -114,6 +115,17 @@ function toolCursor(
 
 function isPanButton(button: number) {
   return button === 1 || button === 2;
+}
+
+function isTextInputActive(): boolean {
+  const el = document.activeElement;
+  if (!el) return false;
+  const tag = el.tagName;
+  return (
+    tag === "INPUT" ||
+    tag === "TEXTAREA" ||
+    (el as HTMLElement).isContentEditable
+  );
 }
 
 function shouldStartPan(
@@ -218,9 +230,10 @@ export const GeographyCanvas = forwardRef<
   const [synthesizing, setSynthesizing] = useState(false);
   const [promptPreviewOpen, setPromptPreviewOpen] = useState(false);
   const [promptPreviewLoading, setPromptPreviewLoading] = useState(false);
-  const [promptPreviewText, setPromptPreviewText] = useState<string | null>(
-    null,
-  );
+  const [promptPreviewDefault, setPromptPreviewDefault] = useState<
+    string | null
+  >(null);
+  const { advancedMode, toggleAdvancedMode } = useCanvasAdvancedMode(projectId);
   const [promptPreviewWarnings, setPromptPreviewWarnings] = useState<string[]>(
     [],
   );
@@ -751,6 +764,7 @@ export const GeographyCanvas = forwardRef<
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code === "Space" && !e.repeat) {
+        if (isTextInputActive()) return;
         if (
           containerRef.current?.contains(document.activeElement) ||
           document.activeElement === document.body
@@ -1136,7 +1150,7 @@ export const GeographyCanvas = forwardRef<
     persistSynthesisNotes(notes);
     setPromptPreviewOpen(true);
     setPromptPreviewLoading(true);
-    setPromptPreviewText(null);
+    setPromptPreviewDefault(null);
     setPromptPreviewWarnings([]);
 
     try {
@@ -1151,6 +1165,7 @@ export const GeographyCanvas = forwardRef<
 
       const data = (await res.json()) as {
         prompt?: string;
+        default_prompt?: string;
         warnings?: string[];
         error?: string;
       };
@@ -1159,7 +1174,9 @@ export const GeographyCanvas = forwardRef<
         throw new Error(data.error ?? "Failed to load prompt preview");
       }
 
-      setPromptPreviewText(data.prompt ?? "");
+      setPromptPreviewDefault(
+        data.default_prompt ?? data.prompt ?? "",
+      );
       setPromptPreviewWarnings(data.warnings ?? []);
     } catch (err) {
       setPromptPreviewOpen(false);
@@ -1181,11 +1198,12 @@ export const GeographyCanvas = forwardRef<
   const handleCloseSynthesisPreview = useCallback(() => {
     if (synthesizing) return;
     setPromptPreviewOpen(false);
-    setPromptPreviewText(null);
+    setPromptPreviewDefault(null);
     setPromptPreviewWarnings([]);
   }, [synthesizing]);
 
-  const handleSynthesizeScenery = useCallback(async () => {
+  const handleSynthesizeScenery = useCallback(
+    async (promptOverride?: string) => {
     if (!apiAvailable || synthesizing) return;
 
     const { hasStrokes, notes, body } = buildSynthesisRequestBody();
@@ -1205,7 +1223,12 @@ export const GeographyCanvas = forwardRef<
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
+          body: JSON.stringify({
+            ...body,
+            ...(promptOverride
+              ? { prompt_override: promptOverride }
+              : {}),
+          }),
         },
       );
 
@@ -1263,21 +1286,38 @@ export const GeographyCanvas = forwardRef<
     } finally {
       setSynthesizing(false);
     }
-  }, [
-    apiAvailable,
-    synthesizing,
-    projectId,
-    buildSynthesisRequestBody,
-    persistSynthesisNotes,
-  ]);
+  },
+    [
+      apiAvailable,
+      synthesizing,
+      projectId,
+      buildSynthesisRequestBody,
+      persistSynthesisNotes,
+    ],
+  );
 
-  const handleConfirmSynthesisFromPreview = useCallback(() => {
-    void handleSynthesizeScenery().finally(() => {
-      setPromptPreviewOpen(false);
-      setPromptPreviewText(null);
-      setPromptPreviewWarnings([]);
-    });
-  }, [handleSynthesizeScenery]);
+  const handleConfirmSynthesisFromPreview = useCallback(
+    (editedPrompt: string) => {
+      void handleSynthesizeScenery(editedPrompt).finally(() => {
+        setPromptPreviewOpen(false);
+        setPromptPreviewDefault(null);
+        setPromptPreviewWarnings([]);
+      });
+    },
+    [handleSynthesizeScenery],
+  );
+
+  const handleSynthesizeClick = useCallback(() => {
+    if (advancedMode) {
+      void handleOpenSynthesisPreview();
+    } else {
+      void handleSynthesizeScenery();
+    }
+  }, [
+    advancedMode,
+    handleOpenSynthesisPreview,
+    handleSynthesizeScenery,
+  ]);
 
   const toolbar = useMemo(
     () => (
@@ -1318,6 +1358,7 @@ export const GeographyCanvas = forwardRef<
               value={synthesisUserNotes}
               onChange={(e) => setSynthesisUserNotes(e.target.value)}
               onBlur={() => persistSynthesisNotes(synthesisUserNotes)}
+              onKeyDown={(e) => e.stopPropagation()}
               placeholder="Extra instructions (2D, watercolor…)"
               disabled={synthesizing}
               aria-label="Scenery synthesis instructions"
@@ -1329,7 +1370,7 @@ export const GeographyCanvas = forwardRef<
             <button
               type="button"
               disabled={synthesizing || promptPreviewLoading}
-              onClick={() => void handleOpenSynthesisPreview()}
+              onClick={() => void handleSynthesizeClick()}
               className={cn(
                 "rounded-md px-3 py-1.5 text-xs font-medium text-[#a78bfa] hover:bg-[#7c3aed]/20",
                 (synthesizing || promptPreviewLoading) &&
@@ -1342,6 +1383,17 @@ export const GeographyCanvas = forwardRef<
                   ? "Loading…"
                   : "Synthesize"}
             </button>
+            <span className="mx-0.5 h-5 w-px bg-[#2a2a2e]" aria-hidden />
+            <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-xs text-[#9ca3af] hover:text-[#e5e7eb]">
+              <input
+                type="checkbox"
+                checked={advancedMode}
+                onChange={toggleAdvancedMode}
+                disabled={synthesizing}
+                className="h-3.5 w-3.5 rounded border-[#2a2a2e] bg-[#0f0f12] text-[#7c3aed] focus:ring-[#7c3aed]/40"
+              />
+              Advanced
+            </label>
           </>
         ) : null}
       </div>
@@ -1353,8 +1405,10 @@ export const GeographyCanvas = forwardRef<
       synthesizing,
       synthesisUserNotes,
       persistSynthesisNotes,
-      handleOpenSynthesisPreview,
+      handleSynthesizeClick,
       promptPreviewLoading,
+      advancedMode,
+      toggleAdvancedMode,
     ],
   );
 
@@ -1366,13 +1420,14 @@ export const GeographyCanvas = forwardRef<
       onPointerDown={() => containerRef.current?.focus({ preventScroll: true })}
     >
       <SceneryPromptPreviewModal
+        key={promptPreviewDefault ?? (promptPreviewLoading ? "loading" : "empty")}
         open={promptPreviewOpen}
         loading={promptPreviewLoading}
-        prompt={promptPreviewText}
+        defaultPrompt={promptPreviewDefault}
         warnings={promptPreviewWarnings}
         confirming={synthesizing}
         onClose={handleCloseSynthesisPreview}
-        onConfirm={() => void handleConfirmSynthesisFromPreview()}
+        onConfirm={handleConfirmSynthesisFromPreview}
       />
       {loading ? (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#0e0e0f]/80">

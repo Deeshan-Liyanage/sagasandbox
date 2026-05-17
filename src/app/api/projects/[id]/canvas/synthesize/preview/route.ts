@@ -39,6 +39,7 @@ export async function POST(request: Request, context: RouteContext) {
 
     return NextResponse.json({
       prompt,
+      default_prompt: prompt,
       has_sketch_reference: hasSketchReference,
       warnings,
     });

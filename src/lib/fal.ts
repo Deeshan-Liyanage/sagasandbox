@@ -39,8 +39,21 @@ function isLocalDev(): boolean {
   return siteUrl.includes("localhost") || siteUrl.includes("127.0.0.1")
 }
 
+/** General-purpose generation (pins, events, characters). */
 export const FLUX_TEXT_MODEL = "fal-ai/flux/dev"
 export const FLUX_IMG2IMG_MODEL = "fal-ai/flux/dev/image-to-image"
+
+/** Canvas scenery synthesis — FLUX 1.1 Pro (higher fidelity than flux/dev). */
+export const SCENERY_FLUX_TEXT_MODEL = "fal-ai/flux-pro/v1.1"
+export const SCENERY_FLUX_IMG2IMG_MODEL = "fal-ai/flux-pro/v1.1-ultra"
+
+function isFluxProUltraModel(model: string): boolean {
+  return model.includes("flux-pro/v1.1-ultra")
+}
+
+function isFluxDevImg2ImgModel(model: string): boolean {
+  return model.includes("/image-to-image")
+}
 
 export interface FalQueueOptions {
   prompt: string
@@ -87,16 +100,32 @@ export async function falQueue(
   const model =
     options.model ?? (imageUrl ? FLUX_IMG2IMG_MODEL : FLUX_TEXT_MODEL)
 
-  const input: Record<string, unknown> = {
-    prompt,
-    image_size: { width, height },
-    num_inference_steps: imageUrl ? 40 : 28,
-    guidance_scale: 3.5,
-  }
+  const input: Record<string, unknown> = { prompt }
 
-  if (imageUrl) {
+  if (isFluxProUltraModel(model)) {
+    input.aspect_ratio = "16:9"
+    input.num_images = 1
+    if (imageUrl) {
+      input.image_url = imageUrl
+      // Map dev img2img strength (~0.88) to ultra image_prompt_strength.
+      input.image_prompt_strength = options.strength ?? 0.85
+    }
+  } else if (imageUrl && isFluxDevImg2ImgModel(model)) {
+    input.image_size = { width, height }
+    input.num_inference_steps = 40
+    input.guidance_scale = 3.5
     input.image_url = imageUrl
     input.strength = options.strength ?? 0.88
+  } else {
+    input.image_size = { width, height }
+    if (!imageUrl) {
+      input.num_inference_steps = isFluxDevImg2ImgModel(model) ? 40 : 28
+      input.guidance_scale = 3.5
+    }
+    if (imageUrl) {
+      input.image_url = imageUrl
+      input.strength = options.strength ?? 0.88
+    }
   }
 
   if (isLocalDev()) {

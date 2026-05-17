@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import { isAuthError, jsonError, requireAuth } from "@/lib/api-auth";
 import { extractCanvasMeta, patchCanvasMeta } from "@/lib/canvas-state";
 import { uploadCanvasSketchDataUrl } from "@/lib/canvas-sketch-upload";
-import { FLUX_IMG2IMG_MODEL, FLUX_TEXT_MODEL, falQueue } from "@/lib/fal";
+import {
+  SCENERY_FLUX_IMG2IMG_MODEL,
+  SCENERY_FLUX_TEXT_MODEL,
+  falQueue,
+} from "@/lib/fal";
 import { falDepthMap } from "@/lib/fal-media";
 import {
   resolveScenerySynthesis,
@@ -88,7 +92,9 @@ export async function POST(request: Request, context: RouteContext) {
       });
     }
 
-    const falModel = hasSketchReference ? FLUX_IMG2IMG_MODEL : FLUX_TEXT_MODEL;
+    const falModel = hasSketchReference
+      ? SCENERY_FLUX_IMG2IMG_MODEL
+      : SCENERY_FLUX_TEXT_MODEL;
 
     const result = await falQueue({
       prompt,

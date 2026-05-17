@@ -5,11 +5,13 @@ import {
   patchCanvasMeta,
   type CanvasMeta,
 } from "@/lib/canvas-state";
-import { FLUX_IMG2IMG_MODEL, FLUX_TEXT_MODEL } from "@/lib/fal";
+import {
+  SCENERY_FLUX_IMG2IMG_MODEL,
+  SCENERY_FLUX_TEXT_MODEL,
+} from "@/lib/fal";
 import type { Database, Json } from "@/types/db";
 
-export const SCENERY_FLUX_TEXT_MODEL = FLUX_TEXT_MODEL;
-export const SCENERY_FLUX_IMG2IMG_MODEL = FLUX_IMG2IMG_MODEL;
+export { SCENERY_FLUX_IMG2IMG_MODEL, SCENERY_FLUX_TEXT_MODEL };
 export const SCENERY_PENDING = "pending";
 export const SCENERY_ERROR = "error";
 export const SCENERY_SYNTHESIS_TIMEOUT_MS = 5 * 60 * 1000;

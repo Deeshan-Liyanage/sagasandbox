@@ -6,6 +6,7 @@ import {
 } from "@/lib/scenery-prompt";
 
 export const MAX_SKETCH_DATA_URL_CHARS = 4 * 1024 * 1024;
+export const MAX_PROMPT_OVERRIDE_CHARS = 8_000;
 
 export interface ScenerySynthesizeRequestBody {
   reference_image_url?: string;
@@ -13,6 +14,8 @@ export interface ScenerySynthesizeRequestBody {
   has_strokes?: boolean;
   synthesis_user_notes?: string | null;
   geospatial?: SceneryGeospatialContext;
+  /** When set, used as the Fal prompt instead of the built default. */
+  prompt_override?: string;
 }
 
 export interface ResolvedScenerySynthesis {
@@ -41,7 +44,27 @@ export function validateScenerySynthesizeBody(
       status: 413,
     };
   }
+  if (body.prompt_override !== undefined) {
+    const trimmed = body.prompt_override.trim();
+    if (trimmed.length === 0) {
+      return { error: "Prompt cannot be empty", status: 400 };
+    }
+    if (body.prompt_override.length > MAX_PROMPT_OVERRIDE_CHARS) {
+      return {
+        error: `Prompt exceeds maximum length (${MAX_PROMPT_OVERRIDE_CHARS} characters)`,
+        status: 400,
+      };
+    }
+  }
   return null;
+}
+
+export function resolveSceneryPrompt(
+  builtPrompt: string,
+  promptOverride?: string,
+): string {
+  const override = promptOverride?.trim();
+  return override && override.length > 0 ? override : builtPrompt;
 }
 
 export async function resolveScenerySynthesis(
@@ -125,12 +148,14 @@ export async function resolveScenerySynthesis(
     );
   }
 
-  const prompt = buildScenerySynthesisPrompt({
+  const builtPrompt = buildScenerySynthesisPrompt({
     project,
     hasSketchReference,
     geospatial,
     synthesis_user_notes: synthesisUserNotes,
   });
+
+  const prompt = resolveSceneryPrompt(builtPrompt, body.prompt_override);
 
   return {
     ok: true,
