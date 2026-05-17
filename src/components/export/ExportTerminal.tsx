@@ -1,12 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Download } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Download, FileDown } from "lucide-react";
 import type { Export, ExportType, TimelineEvent } from "@/types/app";
 import { RemoteImage } from "@/components/shared/RemoteImage";
 import {
-  type NamedDownloadLink,
-  downloadNamedArtifactsSequential,
+  type ExportFileDescriptor,
+  downloadAllProxied,
+  downloadProxyUrl,
+  downloadViaAnchor,
+  fetchExportFiles,
 } from "@/lib/export-download";
 import { cn } from "@/lib/cn";
 import {
@@ -50,7 +53,11 @@ function progressWidth(status: Export["status"] | null) {
 }
 
 function exportTypeBadge(type: string): ExportType | null {
-  if (type === "storyboard_pdf" || type === "audio_script" || type === "animatic_video") {
+  if (
+    type === "storyboard_pdf" ||
+    type === "audio_script" ||
+    type === "animatic_video"
+  ) {
     return type;
   }
   return null;
@@ -90,6 +97,11 @@ export function ExportTerminal({
   const [recentExports, setRecentExports] = useState<Export[]>([]);
   const [recentLoading, setRecentLoading] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [filesByExport, setFilesByExport] = useState<
+    Record<string, ExportFileDescriptor[] | "loading" | "error">
+  >({});
+
+  const completedNotifiedRef = useRef<Set<string>>(new Set());
 
   const realtimeExport =
     liveExport && currentExportId && liveExport.id === currentExportId
@@ -115,7 +127,9 @@ export function ExportTerminal({
     if (!apiAvailable) return;
     setRecentLoading(true);
     try {
-      const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/exports`);
+      const res = await fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/exports`,
+      );
       if (!res.ok) {
         throw new Error(await readApiError(res, "Could not load exports"));
       }
@@ -128,11 +142,69 @@ export function ExportTerminal({
     }
   }, [projectId, apiAvailable]);
 
+  const loadFilesForExport = useCallback(
+    async (expId: string) => {
+      setFilesByExport((prev) => ({ ...prev, [expId]: "loading" }));
+      const result = await fetchExportFiles(projectId, expId);
+      if (result.ok) {
+        setFilesByExport((prev) => ({ ...prev, [expId]: result.files }));
+      } else {
+        setFilesByExport((prev) => ({ ...prev, [expId]: "error" }));
+      }
+    },
+    [projectId],
+  );
+
   useEffect(() => {
     void Promise.resolve()
       .then(() => loadRecentExports())
       .catch(() => undefined);
   }, [loadRecentExports]);
+
+  const mergeExportRow = useCallback((row: Export) => {
+    setRecentExports((prev) => {
+      const idx = prev.findIndex((r) => r.id === row.id);
+      if (idx === -1) return [row, ...prev].slice(0, 40);
+      if (
+        prev[idx].status === row.status &&
+        prev[idx].output_url === row.output_url
+      ) {
+        return prev;
+      }
+      const next = [...prev];
+      next[idx] = row;
+      return next;
+    });
+  }, []);
+
+  // Realtime export update from the parent (Supabase Realtime) — refresh the
+  // recents list (and the currently selected export) as soon as the row's
+  // status flips, so the user does not need to hit Refresh manually.
+  const liveExportId = liveExport?.id;
+  const liveExportStatus = liveExport?.status;
+  useEffect(() => {
+    if (!liveExport) return;
+    const raf = requestAnimationFrame(() => {
+      mergeExportRow(liveExport);
+      if (
+        (liveExportStatus === "done" || liveExportStatus === "error") &&
+        liveExportId &&
+        !completedNotifiedRef.current.has(liveExportId)
+      ) {
+        completedNotifiedRef.current.add(liveExportId);
+        if (liveExportStatus === "done") {
+          void loadFilesForExport(liveExportId);
+        }
+      }
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [
+    liveExport,
+    liveExportId,
+    liveExportStatus,
+    loadFilesForExport,
+    mergeExportRow,
+  ]);
 
   async function startExport() {
     if (!apiAvailable) {
@@ -148,14 +220,17 @@ export function ExportTerminal({
     setExportStatus(null);
     setCurrentExportId(null);
     try {
-      const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/exports`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: exportType,
-          event_ids: Array.from(selected),
-        }),
-      });
+      const res = await fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/exports`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: exportType,
+            event_ids: Array.from(selected),
+          }),
+        },
+      );
       if (!res.ok) {
         throw new Error(await readApiError(res, "Export failed to start"));
       }
@@ -189,15 +264,23 @@ export function ExportTerminal({
           `/api/projects/${encodeURIComponent(projectId)}/exports/${encodeURIComponent(currentExportId)}`,
         );
         if (!res.ok) return;
-        const data = (await res.json()) as {
-          export: Export;
-          signed_url?: string;
-          artifacts?: NamedDownloadLink[];
-        };
+        const data = (await res.json()) as { export: Export };
         setExportStatus(data.export.status);
         onExportUpdate?.(data.export);
-        if (data.export.status === "done" || data.export.status === "error") {
+        mergeExportRow(data.export);
+
+        if (
+          data.export.status === "done" ||
+          data.export.status === "error"
+        ) {
           clearInterval(interval);
+          if (
+            data.export.status === "done" &&
+            !completedNotifiedRef.current.has(data.export.id)
+          ) {
+            completedNotifiedRef.current.add(data.export.id);
+            void loadFilesForExport(data.export.id);
+          }
         }
       } catch {
         // ignore poll errors
@@ -211,39 +294,42 @@ export function ExportTerminal({
     onExportUpdate,
     realtimeActive,
     realtimeExport?.status,
+    loadFilesForExport,
+    mergeExportRow,
   ]);
 
-  async function handleDownloadById(expId: string) {
+  async function ensureFilesLoaded(
+    expId: string,
+  ): Promise<ExportFileDescriptor[] | null> {
+    const current = filesByExport[expId];
+    if (Array.isArray(current)) return current;
+    setFilesByExport((prev) => ({ ...prev, [expId]: "loading" }));
+    const result = await fetchExportFiles(projectId, expId);
+    if (result.ok) {
+      setFilesByExport((prev) => ({ ...prev, [expId]: result.files }));
+      return result.files;
+    }
+    setFilesByExport((prev) => ({ ...prev, [expId]: "error" }));
+    toastError(result.error);
+    return null;
+  }
+
+  async function handleDownloadAll(expId: string) {
     if (!apiAvailable) return;
     setDownloadingId(expId);
     try {
-      const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/exports/${encodeURIComponent(expId)}`);
-      if (!res.ok) {
-        toastError(await readApiError(res, "Download lookup failed"));
-        return;
-      }
-      const data = (await res.json()) as {
-        export: Export;
-        signed_url?: string;
-        artifacts?: NamedDownloadLink[];
-      };
-      const exp = data.export;
-      if (exp.status !== "done") return;
-
-      const artifacts = (data.artifacts ?? []).filter(
-        (a) => a?.url?.trim() && a?.filename?.trim(),
-      );
-      if (artifacts.length === 0) {
+      const files = await ensureFilesLoaded(expId);
+      if (!files || files.length === 0) {
         toastError(
-          "This export finished but no files were resolved. Try Refresh or regenerate the export.",
+          "No downloadable files were resolved for this export. The render may have failed silently.",
         );
         return;
       }
-      await downloadNamedArtifactsSequential(artifacts);
+      await downloadAllProxied(projectId, expId, files);
       toastSuccess(
-        artifacts.length === 1
-          ? `Saved "${artifacts[0].filename}".`
-          : `Saved ${artifacts.length} files to your Downloads folder.`,
+        files.length === 1
+          ? `Saved "${files[0].filename}".`
+          : `Saved ${files.length} files to your Downloads folder.`,
       );
     } catch (e) {
       toastError(e instanceof Error ? e.message : "Download failed");
@@ -254,7 +340,7 @@ export function ExportTerminal({
 
   async function handleDownloadCurrent() {
     if (!currentExportId || !terminalExportDone) return;
-    await handleDownloadById(currentExportId);
+    await handleDownloadAll(currentExportId);
   }
 
   return (
@@ -262,7 +348,9 @@ export function ExportTerminal({
       <h3 className="text-sm font-semibold text-white">Export Terminal</h3>
 
       {!apiAvailable ? (
-        <p className="text-xs text-[#9ca3af]">{PROJECT_API_UNAVAILABLE_MESSAGE}</p>
+        <p className="text-xs text-[#9ca3af]">
+          {PROJECT_API_UNAVAILABLE_MESSAGE}
+        </p>
       ) : null}
 
       <div className="flex flex-wrap gap-2">
@@ -369,40 +457,52 @@ export function ExportTerminal({
         ) : recentExports.length === 0 ? (
           <p className="text-xs text-[#9ca3af]">No exports yet.</p>
         ) : (
-          <ul className="max-h-40 space-y-1.5 overflow-y-auto">
+          <ul className="max-h-60 space-y-1.5 overflow-y-auto">
             {recentExports.map((row) => {
               const t = exportTypeBadge(row.type);
               const label = t ? TYPE_LABELS[t] : row.type;
+              const files = filesByExport[row.id];
 
               return (
                 <li
                   key={row.id}
-                  className="flex items-center gap-2 text-xs text-white"
+                  className="rounded-md border border-[#2a2a2e] bg-[#141416] p-2 text-xs text-white"
                 >
-                  <span className="truncate font-medium text-[#e5e7eb]">
-                    {label}
-                  </span>
-                  <span className="flex-1 truncate text-[10px] text-[#9ca3af]">
-                    {formatExportTime(row.created_at)} ·{" "}
-                    <span className="font-mono">{row.status}</span>
-                  </span>
-                  {row.status === "done" ? (
-                    <button
-                      type="button"
-                      disabled={!apiAvailable || downloadingId !== null}
-                      title="Download to your device"
-                      onClick={() => void handleDownloadById(row.id)}
-                      className="shrink-0 rounded-md border border-[#2a2a2e] px-2 py-1 text-[10px] text-[#10b981] hover:border-[#10b981] disabled:opacity-50"
-                    >
-                      {downloadingId === row.id ? "Saving…" : "Download"}
-                    </button>
-                  ) : row.status === "error" ? (
-                    <span className="text-[10px] text-[#ef4444]">Failed</span>
-                  ) : (
-                    <span className="text-[10px] text-[#9ca3af]">
-                      Processing…
+                  <div className="flex items-center gap-2">
+                    <span className="truncate font-medium text-[#e5e7eb]">
+                      {label}
                     </span>
-                  )}
+                    <span className="flex-1 truncate text-[10px] text-[#9ca3af]">
+                      {formatExportTime(row.created_at)} ·{" "}
+                      <span className="font-mono">{row.status}</span>
+                    </span>
+                    {row.status === "done" ? (
+                      <button
+                        type="button"
+                        disabled={!apiAvailable || downloadingId !== null}
+                        title="Download to your device"
+                        onClick={() => void handleDownloadAll(row.id)}
+                        className="shrink-0 rounded-md border border-[#2a2a2e] px-2 py-1 text-[10px] text-[#10b981] hover:border-[#10b981] disabled:opacity-50"
+                      >
+                        {downloadingId === row.id ? "Saving…" : "Download"}
+                      </button>
+                    ) : row.status === "error" ? (
+                      <span className="text-[10px] text-[#ef4444]">Failed</span>
+                    ) : (
+                      <span className="text-[10px] text-[#9ca3af]">
+                        Processing…
+                      </span>
+                    )}
+                  </div>
+
+                  {row.status === "done" ? (
+                    <PerFileLinks
+                      projectId={projectId}
+                      exportId={row.id}
+                      files={files}
+                      onLoad={() => void loadFilesForExport(row.id)}
+                    />
+                  ) : null}
                 </li>
               );
             })}
@@ -410,5 +510,78 @@ export function ExportTerminal({
         )}
       </div>
     </div>
+  );
+}
+
+interface PerFileLinksProps {
+  projectId: string;
+  exportId: string;
+  files: ExportFileDescriptor[] | "loading" | "error" | undefined;
+  onLoad: () => void;
+}
+
+function PerFileLinks({
+  projectId,
+  exportId,
+  files,
+  onLoad,
+}: PerFileLinksProps) {
+  useEffect(() => {
+    if (files === undefined) onLoad();
+    // We only want to trigger the initial load once per export id.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exportId]);
+
+  if (files === undefined || files === "loading") {
+    return (
+      <p className="mt-1.5 text-[10px] text-[#6b7280]">Resolving files…</p>
+    );
+  }
+  if (files === "error") {
+    return (
+      <button
+        type="button"
+        onClick={onLoad}
+        className="mt-1.5 text-[10px] text-[#ef4444] hover:underline"
+      >
+        File lookup failed — retry
+      </button>
+    );
+  }
+  if (files.length === 0) {
+    return (
+      <p className="mt-1.5 text-[10px] text-[#ef4444]">
+        No files attached to this export.
+      </p>
+    );
+  }
+  if (files.length === 1) return null;
+
+  return (
+    <ul className="mt-1.5 space-y-1">
+      {files.map((file, idx) => (
+        <li
+          key={`${file.filename}-${idx}`}
+          className="flex items-center justify-between gap-2 rounded bg-[#1c1c20] px-2 py-1"
+        >
+          <span className="truncate text-[10px] text-[#9ca3af]">
+            {file.filename}
+          </span>
+          <button
+            type="button"
+            onClick={() =>
+              downloadViaAnchor(
+                downloadProxyUrl(projectId, exportId, idx),
+                file.filename,
+              )
+            }
+            className="inline-flex shrink-0 items-center gap-1 rounded border border-[#2a2a2e] px-1.5 py-0.5 text-[10px] text-[#c4b5fd] hover:border-[#7c3aed]"
+          >
+            <FileDown className="h-3 w-3" />
+            Save
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }

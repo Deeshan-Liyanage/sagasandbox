@@ -1,12 +1,61 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/db";
 
+/**
+ * Server-only helpers for resolving an `exports` row into concrete downloadable
+ * files. Two output shapes are exposed:
+ *
+ *  - `ResolvedExportArtifact` — name + HTTPS URL (used for the JSON API
+ *    response so the client can show what would be downloaded).
+ *  - `ResolvedExportSource` — name + a `fetch` description with optional
+ *    storage-bucket path so the download proxy can stream the bytes through
+ *    the server without depending on browser CORS or short-lived signed URLs.
+ */
+
 export type ResolvedExportArtifact = {
   filename: string;
   url: string;
 };
 
+export type ResolvedExportSource =
+  | {
+      filename: string;
+      kind: "storage";
+      bucket: string;
+      objectPath: string;
+      contentType?: string;
+    }
+  | {
+      filename: string;
+      kind: "remote";
+      url: string;
+      contentType?: string;
+    };
+
 const SIGN_BUCKETS = ["exports", "audio"] as const;
+
+const CONTENT_TYPE_BY_EXT: Record<string, string> = {
+  mp4: "video/mp4",
+  webm: "video/webm",
+  mov: "video/quicktime",
+  json: "application/json",
+  pdf: "application/pdf",
+  wav: "audio/wav",
+  mp3: "audio/mpeg",
+  ogg: "audio/ogg",
+  opus: "audio/ogg",
+};
+
+function extOf(name: string): string | null {
+  const m = /\.([a-z0-9]+)(?:\?|$)/i.exec(name);
+  return m?.[1]?.toLowerCase() ?? null;
+}
+
+function contentTypeFromFilename(name: string): string | undefined {
+  const ext = extOf(name);
+  if (!ext) return undefined;
+  return CONTENT_TYPE_BY_EXT[ext];
+}
 
 function stripQuery(u: string): string {
   const i = u.indexOf("?");
@@ -18,25 +67,64 @@ async function signedUrlForObject(
   bucket: string,
   objectPath: string,
 ): Promise<string | undefined> {
+  const trimmed = objectPath.trim().replace(/^\/+/, "");
+  if (!trimmed) return undefined;
   const { data, error } = await supabase.storage
     .from(bucket)
-    .createSignedUrl(objectPath.trim(), 60 * 60);
+    .createSignedUrl(trimmed, 60 * 60);
   if (error || !data?.signedUrl) return undefined;
   return data.signedUrl;
 }
 
-async function signedPathDefaultExports(
+async function objectExists(
   supabase: SupabaseClient<Database>,
+  bucket: string,
   objectPath: string,
-): Promise<string | undefined> {
-  const p = objectPath.trim().replace(/^\/+/, "");
-  if (!p) return undefined;
-  return signedUrlForObject(supabase, "exports", p);
+): Promise<boolean> {
+  const trimmed = objectPath.trim().replace(/^\/+/, "");
+  if (!trimmed) return false;
+  const lastSlash = trimmed.lastIndexOf("/");
+  const dir = lastSlash >= 0 ? trimmed.slice(0, lastSlash) : "";
+  const base = lastSlash >= 0 ? trimmed.slice(lastSlash + 1) : trimmed;
+  const { data, error } = await supabase.storage
+    .from(bucket)
+    .list(dir || undefined, { search: base, limit: 1 });
+  if (error || !data) return false;
+  return data.some((f) => f.name === base);
+}
+
+type SupabasePathInfo = { bucket: string; objectPath: string };
+
+/** Parses a Supabase Storage public/sign URL into (bucket, objectPath) — returns null otherwise. */
+function parseSupabaseStorageUrl(absoluteUrl: string): SupabasePathInfo | null {
+  try {
+    const u = new URL(absoluteUrl);
+    const pub = "/storage/v1/object/public/";
+    const sign = "/storage/v1/object/sign/";
+    let rest: string | null = null;
+    let idx = u.pathname.indexOf(pub);
+    if (idx !== -1) rest = u.pathname.slice(idx + pub.length);
+    else {
+      idx = u.pathname.indexOf(sign);
+      if (idx !== -1) rest = u.pathname.slice(idx + sign.length);
+    }
+    if (!rest) return null;
+    const firstSlash = rest.indexOf("/");
+    if (firstSlash < 1) return null;
+    const bucket = decodeURIComponent(rest.slice(0, firstSlash));
+    if (!bucket) return null;
+    const encoded = rest.slice(firstSlash + 1);
+    const objectPath = decodeURIComponent(encoded.replace(/\+/g, " "));
+    if (!objectPath) return null;
+    return { bucket, objectPath };
+  } catch {
+    return null;
+  }
 }
 
 /**
- * Parses Supabase Storage public/sign URLs for known buckets (`exports`, `audio`)
- * and returns a freshly signed HTTPS URL via the authenticated client.
+ * Returns a freshly signed HTTPS URL when `absoluteUrl` points at a known
+ * Supabase Storage bucket, otherwise returns the original URL unchanged.
  */
 export async function refreshSupabaseStoredUrl(
   supabase: SupabaseClient<Database>,
@@ -57,54 +145,44 @@ export async function refreshSupabaseStoredUrl(
         }
       }
     }
-    return signedPathDefaultExports(supabase, trimmed);
+    return signedUrlForObject(supabase, "exports", p);
   }
 
-  try {
-    const u = new URL(trimmed);
-    const pub = "/storage/v1/object/public/";
-    const sign = "/storage/v1/object/sign/";
-    let rest: string | null = null;
-    let idx = u.pathname.indexOf(pub);
-    if (idx !== -1) rest = u.pathname.slice(idx + pub.length);
-    else {
-      idx = u.pathname.indexOf(sign);
-      if (idx !== -1) rest = u.pathname.slice(idx + sign.length);
-    }
-    if (!rest) {
-      return trimmed;
-    }
-    const slash = rest.indexOf("/");
-    if (slash < 1) return trimmed;
-    const bucket = decodeURIComponent(rest.slice(0, slash));
-    const encodedObject = rest.slice(slash + 1);
-    if (!bucket || !(SIGN_BUCKETS as readonly string[]).includes(bucket)) {
-      return trimmed;
-    }
-
-    try {
-      const objectPath = decodeURIComponent(encodedObject.replace(/\+/g, " "));
-      const refreshed = await signedUrlForObject(supabase, bucket, objectPath);
-      return refreshed ?? trimmed;
-    } catch {
-      return trimmed;
-    }
-  } catch {
-    return trimmed;
-  }
+  const info = parseSupabaseStorageUrl(trimmed);
+  if (!info) return trimmed;
+  if (!(SIGN_BUCKETS as readonly string[]).includes(info.bucket)) return trimmed;
+  const refreshed = await signedUrlForObject(
+    supabase,
+    info.bucket,
+    info.objectPath,
+  );
+  return refreshed ?? trimmed;
 }
 
-/** Parse narration export `output_url` JSON array of absolute URLs from storage/fal. */
-export function parseNarrationOutputUrls(raw: string | null | undefined): string[] {
-  if (!raw || !String(raw).trim()) return [];
+/** Parses narration `output_url`: JSON array of HTTPS URLs (preferred) or single URL. */
+export function parseNarrationOutputUrls(
+  raw: string | null | undefined,
+): string[] {
+  if (!raw) return [];
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+
   try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (Array.isArray(parsed) && parsed.every((x) => typeof x === "string")) {
-      return parsed.filter((u) => /^https?:\/\//i.test(u));
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (Array.isArray(parsed)) {
+      return parsed
+        .filter((x): x is string => typeof x === "string")
+        .map((s) => s.trim())
+        .filter((s) => /^https?:\/\//i.test(s));
+    }
+    if (typeof parsed === "string" && /^https?:\/\//i.test(parsed.trim())) {
+      return [parsed.trim()];
     }
   } catch {
-    return [];
+    /* fall through */
   }
+
+  if (/^https?:\/\//i.test(trimmed)) return [trimmed];
   return [];
 }
 
@@ -124,66 +202,207 @@ function guessFilenameFromUrl(u: string, fallback: string): string {
   return fallback;
 }
 
-function inferFilenameOneOff(
-  type: Database["public"]["Tables"]["exports"]["Row"]["type"],
-  urlStr: string,
-  idSlice: string,
-): string {
-  const lower = urlStr.toLowerCase();
-  switch (type) {
-    case "storyboard_pdf":
-      return lower.includes(".pdf")
-        ? `saga-storyboard-${idSlice}.pdf`
-        : `saga-storyboard-${idSlice}.json`;
-    case "animatic_video":
-      return lower.endsWith(".json") || lower.includes(".json")
-        ? `saga-animatic-${idSlice}-manifest.json`
-        : `saga-animatic-${idSlice}.mp4`;
-    case "audio_script":
-      return `saga-narration-${idSlice}.wav`;
-    default:
-      return `saga-export-${idSlice}`;
-  }
-}
-
-async function fallbackArtifactsFromOutputUrl(
+/**
+ * Single source of truth for "what files does this completed export contain".
+ * Returns `ResolvedExportSource[]`: storage paths get the bucket + key so the
+ * proxy streams directly; remote URLs (Fal CDN, etc.) are passed through for
+ * server-side fetch.
+ */
+export async function resolveExportSources(
   supabase: SupabaseClient<Database>,
   row: Pick<
     Database["public"]["Tables"]["exports"]["Row"],
-    "id" | "type" | "output_url"
+    "id" | "type" | "status" | "output_url"
   >,
-): Promise<ResolvedExportArtifact[]> {
-  const out = row.output_url?.trim() ?? "";
-  if (!out) return [];
+): Promise<ResolvedExportSource[]> {
+  if (row.status !== "done") return [];
 
-  const idSlice = row.id.slice(0, 8).replace(/-/g, "");
+  const id = row.id;
+  const dashId = id.slice(0, 8);
+  const compactId = id.replace(/-/g, "").slice(0, 8);
+  const sources: ResolvedExportSource[] = [];
+  const outClean = row.output_url?.trim() ?? "";
 
-  if (/^https?:\/\//i.test(out)) {
-    const refreshed = await refreshSupabaseStoredUrl(supabase, out);
-    const urlFinal = refreshed ?? out;
-    if (!/^https?:\/\//i.test(urlFinal)) return [];
-    return [
-      {
-        filename: guessFilenameFromUrl(out, inferFilenameOneOff(row.type, urlFinal, idSlice)),
-        url: urlFinal,
-      },
+  if (row.type === "storyboard_pdf") {
+    const candidates: { bucket: string; objectPath: string }[] = [
+      { bucket: "exports", objectPath: `exports/${id}/storyboard.json` },
+      { bucket: "exports", objectPath: `exports/${id}/storyboard.pdf` },
     ];
+
+    if (outClean && !/^https?:\/\//i.test(outClean)) {
+      candidates.unshift({
+        bucket: "exports",
+        objectPath: outClean.replace(/^\/+/, ""),
+      });
+    }
+    if (outClean && /^https?:\/\//i.test(outClean)) {
+      const info = parseSupabaseStorageUrl(outClean);
+      if (info && (SIGN_BUCKETS as readonly string[]).includes(info.bucket)) {
+        candidates.unshift({ bucket: info.bucket, objectPath: info.objectPath });
+      }
+    }
+
+    for (const { bucket, objectPath } of candidates) {
+      if (await objectExists(supabase, bucket, objectPath)) {
+        const filename =
+          extOf(objectPath) === "pdf"
+            ? `saga-storyboard-${dashId}.pdf`
+            : `saga-storyboard-${dashId}.json`;
+        sources.push({
+          filename,
+          kind: "storage",
+          bucket,
+          objectPath,
+          contentType: contentTypeFromFilename(filename),
+        });
+        break;
+      }
+    }
+  } else if (row.type === "animatic_video") {
+    const mp4Path = `exports/${id}/animatic.mp4`;
+    if (await objectExists(supabase, "exports", mp4Path)) {
+      const filename = `saga-animatic-${dashId}.mp4`;
+      sources.push({
+        filename,
+        kind: "storage",
+        bucket: "exports",
+        objectPath: mp4Path,
+        contentType: "video/mp4",
+      });
+    }
+
+    const jsonPath = `exports/${id}/animatic.json`;
+    if (await objectExists(supabase, "exports", jsonPath)) {
+      const filename = `saga-animatic-${dashId}-manifest.json`;
+      sources.push({
+        filename,
+        kind: "storage",
+        bucket: "exports",
+        objectPath: jsonPath,
+        contentType: "application/json",
+      });
+    }
+
+    // Output_url is set after the webhook persists the MP4 — but if the row
+    // came through the inline / fallback path it may point at a Fal CDN URL
+    // we haven't mirrored to storage yet. Surface that URL so the proxy can
+    // stream it directly.
+    if (sources.length === 0 && outClean) {
+      if (/^https?:\/\//i.test(outClean)) {
+        const info = parseSupabaseStorageUrl(outClean);
+        if (info && (SIGN_BUCKETS as readonly string[]).includes(info.bucket)) {
+          const ext = extOf(info.objectPath) ?? "mp4";
+          const filename =
+            ext === "json"
+              ? `saga-animatic-${dashId}-manifest.json`
+              : `saga-animatic-${dashId}.${ext}`;
+          sources.push({
+            filename,
+            kind: "storage",
+            bucket: info.bucket,
+            objectPath: info.objectPath,
+            contentType: contentTypeFromFilename(filename),
+          });
+        } else {
+          const ext = extOf(stripQuery(outClean)) ?? "mp4";
+          const filename = `saga-animatic-${dashId}.${ext}`;
+          sources.push({
+            filename,
+            kind: "remote",
+            url: outClean,
+            contentType: contentTypeFromFilename(filename) ?? "video/mp4",
+          });
+        }
+      } else {
+        const objectPath = outClean.replace(/^\/+/, "");
+        if (await objectExists(supabase, "exports", objectPath)) {
+          const ext = extOf(objectPath) ?? "mp4";
+          const filename =
+            ext === "json"
+              ? `saga-animatic-${dashId}-manifest.json`
+              : `saga-animatic-${dashId}.${ext}`;
+          sources.push({
+            filename,
+            kind: "storage",
+            bucket: "exports",
+            objectPath,
+            contentType: contentTypeFromFilename(filename),
+          });
+        }
+      }
+    }
+  } else if (row.type === "audio_script") {
+    const urls = parseNarrationOutputUrls(row.output_url);
+
+    if (urls.length === 0) {
+      // Last-resort: a directory listing in case process-export uploaded files
+      // but failed to update output_url with the JSON array.
+      const { data } = await supabase.storage
+        .from("audio")
+        .list(id, { limit: 100 });
+      const fileNames = (data ?? []).map((f) => f.name).sort();
+      fileNames.forEach((name, idx) => {
+        const filename =
+          fileNames.length <= 1
+            ? `saga-narration-${compactId}.wav`
+            : `saga-narration-${compactId}-${idx + 1}.wav`;
+        sources.push({
+          filename,
+          kind: "storage",
+          bucket: "audio",
+          objectPath: `${id}/${name}`,
+          contentType: "audio/wav",
+        });
+      });
+    } else {
+      urls.forEach((rawUrl, idx) => {
+        const info = parseSupabaseStorageUrl(rawUrl);
+        const filename =
+          urls.length <= 1
+            ? `saga-narration-${compactId}.wav`
+            : `saga-narration-${compactId}-${idx + 1}.wav`;
+        const named = guessFilenameFromUrl(rawUrl, filename);
+
+        if (info && (SIGN_BUCKETS as readonly string[]).includes(info.bucket)) {
+          sources.push({
+            filename: named,
+            kind: "storage",
+            bucket: info.bucket,
+            objectPath: info.objectPath,
+            contentType: contentTypeFromFilename(named) ?? "audio/wav",
+          });
+        } else {
+          sources.push({
+            filename: named,
+            kind: "remote",
+            url: rawUrl,
+            contentType: contentTypeFromFilename(named) ?? "audio/wav",
+          });
+        }
+      });
+    }
   }
 
-  const signed = await signedPathDefaultExports(supabase, out);
-  if (signed) {
-    return [
-      {
-        filename: inferFilenameOneOff(row.type, signed, idSlice),
-        url: signed,
-      },
-    ];
+  // Final, never-empty fallback: if nothing matched but output_url is HTTPS,
+  // surface it as a remote source so the proxy can stream it.
+  if (sources.length === 0 && outClean && /^https?:\/\//i.test(outClean)) {
+    const ext = extOf(stripQuery(outClean)) ?? "bin";
+    const filename = `saga-export-${dashId}.${ext}`;
+    sources.push({
+      filename,
+      kind: "remote",
+      url: outClean,
+      contentType: contentTypeFromFilename(filename),
+    });
   }
 
-  return [];
+  return sources;
 }
 
-/** Build ordered HTTPS download URLs for a completed exports row (server-only). */
+/**
+ * Lightweight version used by the JSON list endpoint — produces HTTPS URLs
+ * (signed when the source lives in a known Supabase bucket).
+ */
 export async function resolveExportArtifacts(
   supabase: SupabaseClient<Database>,
   row: Pick<
@@ -191,118 +410,25 @@ export async function resolveExportArtifacts(
     "id" | "type" | "status" | "output_url"
   >,
 ): Promise<ResolvedExportArtifact[]> {
-  if (row.status !== "done") return [];
-
-  const id = row.id;
-  const idSliceNorm = id.replace(/-/g, "").slice(0, 8);
-  const files: ResolvedExportArtifact[] = [];
-
-  if (row.type === "storyboard_pdf") {
-    const objectPath = `exports/${id}/storyboard.json`;
-    let signed = await signedUrlForObject(supabase, "exports", objectPath);
-
-    const outClean = row.output_url?.trim() ?? "";
-    if (!signed && outClean) {
-      if (/^https?:\/\//i.test(outClean)) {
-        signed = await refreshSupabaseStoredUrl(supabase, outClean);
-      } else {
-        signed = await signedUrlForObject(
-          supabase,
-          "exports",
-          outClean.replace(/^\/+/, ""),
-        );
-      }
-    }
-
-    if (signed) {
-      files.push({
-        filename: `saga-storyboard-${id.slice(0, 8)}.json`,
-        url: signed,
-      });
-    }
-  } else if (row.type === "animatic_video") {
-    const mp4Canonical = `exports/${id}/animatic.mp4`;
-    const mp4Signed = await signedUrlForObject(supabase, "exports", mp4Canonical);
-    if (mp4Signed) {
-      files.push({ filename: `saga-animatic-${id.slice(0, 8)}.mp4`, url: mp4Signed });
-    }
-
-    const jsonCanonical = `exports/${id}/animatic.json`;
-    const jsonSigned = await signedUrlForObject(supabase, "exports", jsonCanonical);
-    if (jsonSigned) {
-      files.push({
-        filename: `saga-animatic-${id.slice(0, 8)}-manifest.json`,
-        url: jsonSigned,
-      });
-    }
-
-    const out = row.output_url?.trim() ?? "";
-    if (files.length === 0 && out) {
-      const resolved =
-        /^https?:\/\//i.test(out)
-          ? ((await refreshSupabaseStoredUrl(supabase, out)) ?? out)
-          : await signedPathDefaultExports(supabase, out);
-      if (resolved) {
-        files.push({
-          filename: inferFilenameOneOff(row.type, resolved, idSliceNorm),
-          url: resolved,
-        });
-      }
-    }
-  } else if (row.type === "audio_script") {
-    const outClean = row.output_url?.trim() ?? "";
-    const urlsStrict = parseNarrationOutputUrls(row.output_url);
-    const urls = urlsStrict.length > 0 ? urlsStrict : narrationUrlsLoose(row.output_url);
-    const short = idSliceNorm;
-
-    for (let idx = 0; idx < urls.length; idx++) {
-      const url = urls[idx];
-      const refreshed = (await refreshSupabaseStoredUrl(supabase, url)) ?? url;
-      const fname =
-        urls.length <= 1
-          ? `saga-narration-${short}.wav`
-          : `saga-narration-${short}-${idx + 1}.wav`;
-      files.push({
-        filename: guessFilenameFromUrl(url, fname),
-        url: refreshed,
-      });
-    }
-
-    if (files.length === 0 && /^https?:\/\//i.test(outClean)) {
-      const refreshed = await refreshSupabaseStoredUrl(supabase, outClean);
-      const url = refreshed ?? outClean;
-      files.push({
-        filename: `saga-narration-${short}.wav`,
-        url,
-      });
-    }
-
-    if (files.length === 0 && outClean) {
-      try {
-        const trimmed = JSON.parse(outClean) as unknown;
-        if (
-          typeof trimmed === "string" &&
-          /^https?:\/\//i.test(trimmed.trim())
-        ) {
-          const u = trimmed.trim();
-          const r = (await refreshSupabaseStoredUrl(supabase, u)) ?? u;
-          files.push({ filename: guessFilenameFromUrl(u, `saga-narration-${short}.wav`), url: r });
-        }
-      } catch {
-        /* ignore */
-      }
+  const sources = await resolveExportSources(supabase, row);
+  const out: ResolvedExportArtifact[] = [];
+  for (const s of sources) {
+    if (s.kind === "storage") {
+      const signed = await signedUrlForObject(
+        supabase,
+        s.bucket,
+        s.objectPath,
+      );
+      if (signed) out.push({ filename: s.filename, url: signed });
+    } else {
+      out.push({ filename: s.filename, url: s.url });
     }
   }
-
-  if (files.length === 0) {
-    return fallbackArtifactsFromOutputUrl(supabase, row);
-  }
-
   const seen = new Set<string>();
-  return files.filter((f) => {
-    const k = `${f.filename}|${f.url}`;
-    if (seen.has(k)) return false;
-    seen.add(k);
+  return out.filter((f) => {
+    const key = `${f.filename}|${f.url}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
     return true;
   });
 }
