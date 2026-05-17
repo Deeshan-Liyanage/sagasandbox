@@ -13,6 +13,9 @@ export interface MapPinsListProps {
   onFocusPin: (pin: LocationPin) => void;
 }
 
+const RAIL_CLASSES =
+  "flex h-full min-h-0 w-[272px] max-w-[38vw] shrink-0 flex-col border-l border-[#2a2a2e] bg-[#1a1a1e] shadow-[-12px_0_24px_rgba(0,0,0,0.25)]";
+
 function pinAccent(status: LocationPin["gen_status"]) {
   return GEN_STATUS_COLORS[status] ?? "#10b981";
 }
@@ -28,17 +31,21 @@ export function MapPinsList({
     return (
       <aside
         aria-label="Map locations"
-        className="pointer-events-auto absolute bottom-24 left-0 top-14 z-[3] flex w-[min(240px,90vw)] flex-col border border-l-0 border-t-0 border-[#2a2a2e] bg-[#1a1a1e]/96 shadow-lg backdrop-blur-sm"
+        className={cn(RAIL_CLASSES, "pointer-events-auto z-[5]")}
       >
-        <header className="flex items-center gap-2 border-b border-[#2a2a2e] px-3 py-2.5">
-          <MapPinned className="h-4 w-4 shrink-0 text-[#a78bfa]" />
-          <h2 className="text-[11px] font-semibold uppercase tracking-wide text-[#9ca3af]">
-            Locations
-          </h2>
+        <header className="shrink-0 border-b border-[#2a2a2e] px-3 py-3">
+          <div className="flex items-center gap-2">
+            <MapPinned className="h-4 w-4 shrink-0 text-[#a78bfa]" />
+            <h2 className="text-[11px] font-semibold uppercase tracking-wide text-[#9ca3af]">
+              Locations
+            </h2>
+          </div>
         </header>
-        <p className="px-3 py-4 text-xs text-[#6b7280]">
-          No pins yet. Click empty map space to drop a location.
-        </p>
+        <div className="flex min-h-0 flex-1 flex-col px-3 py-4">
+          <p className="text-xs leading-relaxed text-[#6b7280]">
+            No pins yet. Click empty map space to drop a location.
+          </p>
+        </div>
       </aside>
     );
   }
@@ -46,9 +53,9 @@ export function MapPinsList({
   return (
     <aside
       aria-label="Map locations"
-      className="pointer-events-auto absolute bottom-24 left-0 top-14 z-[3] flex w-[min(260px,90vw)] flex-col border border-l-0 border-t-0 border-[#2a2a2e] bg-[#1a1a1e]/96 shadow-lg backdrop-blur-sm"
+      className={cn(RAIL_CLASSES, "pointer-events-auto z-[5]")}
     >
-      <header className="flex items-center justify-between border-b border-[#2a2a2e] px-3 py-2">
+      <header className="shrink-0 border-b border-[#2a2a2e] px-3 py-3">
         <div className="flex items-center gap-2">
           <MapPinned className="h-4 w-4 shrink-0 text-[#a78bfa]" />
           <h2 className="text-[11px] font-semibold uppercase tracking-wide text-[#9ca3af]">
@@ -60,14 +67,14 @@ export function MapPinsList({
         </div>
       </header>
 
-      <ul className="min-h-0 flex-1 list-none overflow-y-auto p-2 pb-16">
+      <ul className="min-h-0 flex-1 list-none overflow-y-auto overflow-x-hidden p-2 pt-3">
         {pins.map((pin) => {
           const isActive =
             pin.id === activePinId || pin.id === highlightedPinId;
           const accent = pinAccent(pin.gen_status);
 
           return (
-            <li key={pin.id} className="mb-1">
+            <li key={pin.id} className="mb-1.5">
               <div
                 className={cn(
                   "flex rounded-md overflow-hidden transition-colors",
