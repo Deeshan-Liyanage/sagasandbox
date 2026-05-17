@@ -202,25 +202,25 @@ export function defaultSceneryTransform(
   imageHeight: number,
 ): SceneryTransform {
   if (imageWidth <= 0 || imageHeight <= 0) {
-    return {
+    return normalizeSceneryTransform({
       x: 0,
       y: 0,
       width: Math.max(stageWidth, 1),
       height: Math.max(stageHeight, 1),
       scaleX: 1,
       scaleY: 1,
-    };
+    });
   }
   const fitScale =
     Math.min(stageWidth / imageWidth, stageHeight / imageHeight) * 0.9;
-  return {
+  return normalizeSceneryTransform({
     x: (stageWidth - imageWidth * fitScale) / 2,
     y: (stageHeight - imageHeight * fitScale) / 2,
     width: imageWidth,
     height: imageHeight,
     scaleX: fitScale,
     scaleY: fitScale,
-  };
+  });
 }
 
 /** Read synthesis metadata from persisted canvas_state (wrapper or legacy top-level). */

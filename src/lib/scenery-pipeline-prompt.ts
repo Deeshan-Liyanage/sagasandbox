@@ -67,10 +67,10 @@ export function buildLandmarkPrompt(
 ): string {
   const style = projectStyleConfig(project);
   return [
-    `Isolated landmark asset for a ${style.theme} story map.`,
+    `Isolated landmark asset for a ${style.theme} story map — must visually match the parent map's art style (same illustrative or cartographic language as the base plate).`,
     `Location: "${pinLabel}".`,
     landmarkDescription,
-    `Style: ${style.aesthetic_style}, ${style.tone ?? style.theme}.`,
-    "Single prominent structure or natural feature, top-down or slight aerial, high detail, no text, no map border, square composition on neutral dark ground.",
+    `Style: ${style.aesthetic_style}, ${style.tone ?? style.theme}. Prefer painterly map-art, hand-drawn cartography, or stylized environment illustration — not a glossy disconnected photo cutout.`,
+    "Single prominent structure or natural feature, top-down or slight aerial, no text, no map border, square composition on neutral dark ground.",
   ].join(" ");
 }

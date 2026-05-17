@@ -49,6 +49,7 @@ import {
 } from "@/lib/scenery-synthesis";
 import { cn } from "@/lib/cn";
 import { exportMapSketchToDataUrl } from "@/lib/canvas-sketch-export";
+import { alignedSceneryTransformForGeospatial } from "@/lib/scenery-coords";
 import { buildGeospatialContext } from "@/lib/scenery-geospatial";
 import {
   pipelineStageLabel,
@@ -496,7 +497,11 @@ export const GeographyCanvas = forwardRef<
       return;
     }
 
-    const urlChanged = sceneryImageUrl !== lastSceneryUrlRef.current;
+    const prevUrl = lastSceneryUrlRef.current;
+    const urlChanged =
+      prevUrl !== null &&
+      sceneryImageUrl !== null &&
+      sceneryImageUrl !== prevUrl;
     lastSceneryUrlRef.current = sceneryImageUrl;
 
     const img = new window.Image();
@@ -504,12 +509,15 @@ export const GeographyCanvas = forwardRef<
     img.onload = () => {
       setSceneryImage(img);
       if (urlChanged || !canvasMetaRef.current.scenery_transform) {
-        const next = defaultSceneryTransform(
-          size.width,
-          size.height,
-          img.naturalWidth,
-          img.naturalHeight,
-        );
+        const geo = canvasMetaRef.current.scenery_pipeline_geospatial;
+        const next = geo
+          ? alignedSceneryTransformForGeospatial(geo)
+          : defaultSceneryTransform(
+              size.width,
+              size.height,
+              img.naturalWidth,
+              img.naturalHeight,
+            );
         setSceneryTransform(next);
         canvasMetaRef.current = {
           ...canvasMetaRef.current,
@@ -1498,6 +1506,12 @@ export const GeographyCanvas = forwardRef<
         <p className="pointer-events-none absolute inset-x-4 bottom-20 z-[2] text-center text-[10px] text-[#6b7280]">
           Drag to draw · Click empty map to add pin · Hold Space, Alt, or Shift
           and drag to pan · Middle / right mouse drag to pan
+          {hasSceneryImage ? (
+            <span className="block text-[#5b6577]">
+              Sketch stroke overlay is dimmed while scenery is visible; pins stay
+              aligned to the map when Tier&nbsp;B geospatial data is present.
+            </span>
+          ) : null}
         </p>
       ) : null}
       {toolbar}
@@ -1589,6 +1603,7 @@ export const GeographyCanvas = forwardRef<
               tension={0.4}
               lineCap="round"
               lineJoin="round"
+              opacity={hasSceneryImage ? 0.38 : 1}
               listening={tool !== "scenery"}
             />
           ))}

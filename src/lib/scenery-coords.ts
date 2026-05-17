@@ -1,4 +1,6 @@
 import type { SceneryGeospatialContext, SceneryStrokeBounds } from "@/lib/scenery-prompt";
+import type { SceneryTransform } from "@/lib/canvas-state";
+import { normalizeSceneryTransform } from "@/lib/canvas-state";
 
 export const SCENERY_EXPORT_WIDTH = 1280;
 export const SCENERY_EXPORT_HEIGHT = 720;
@@ -84,4 +86,37 @@ export function canvasToExport(
     x: canvasX * projection.scale + projection.offsetX,
     y: canvasY * projection.scale + projection.offsetY,
   };
+}
+
+/**
+ * Konva transform so scenery PNG pixels (1280×720 export space) align with pin
+ * `(canvas_x, canvas_y)` — same linear map as `canvasToExport` / wireframe.
+ *
+ * Root issue: centering the texture with `defaultSceneryTransform` ignores
+ * projection offset/scale, so pins (world coords) drift from composite pixels.
+ */
+export function alignedSceneryTransformForGeospatial(
+  geospatial: SceneryGeospatialContext,
+): SceneryTransform {
+  const projection = computeMapProjection(geospatial);
+  const s = projection.scale;
+  if (!Number.isFinite(s) || s <= 0) {
+    return normalizeSceneryTransform({
+      x: 0,
+      y: 0,
+      width: SCENERY_EXPORT_WIDTH,
+      height: SCENERY_EXPORT_HEIGHT,
+      scaleX: 1,
+      scaleY: 1,
+    });
+  }
+
+  return normalizeSceneryTransform({
+    x: -projection.offsetX / s,
+    y: -projection.offsetY / s,
+    width: SCENERY_EXPORT_WIDTH,
+    height: SCENERY_EXPORT_HEIGHT,
+    scaleX: 1 / s,
+    scaleY: 1 / s,
+  });
 }
