@@ -8,8 +8,7 @@ import {
   downloadAudioExportArtifacts,
   parseAudioExportUrls,
   resolveExportPrimaryArtifactUrl,
-  buildExportArtifactFilename,
-  triggerBrowserDownload,
+  triggerExportArtifactDownload,
 } from "@/lib/export-download";
 import { cn } from "@/lib/cn";
 import {
@@ -246,7 +245,7 @@ export function ExportTerminal({
         toastError("Export has no downloadable asset yet.");
         return;
       }
-      await triggerBrowserDownload(primary, buildExportArtifactFilename(exp));
+      await triggerExportArtifactDownload(exp, primary);
     } catch (e) {
       toastError(e instanceof Error ? e.message : "Download failed");
     } finally {
