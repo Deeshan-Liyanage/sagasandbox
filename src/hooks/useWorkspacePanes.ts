@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  DEFAULT_PANE_VISIBILITY,
   LAYOUT_PRESETS,
   loadPaneVisibility,
   savePaneVisibility,
@@ -11,16 +12,18 @@ import {
 } from "@/lib/workspace-panes";
 
 export function useWorkspacePanes(projectId: string) {
-  const [paneVisibility, setPaneVisibility] = useState<PaneVisibility>(() =>
-    loadPaneVisibility(projectId),
-  );
+  // Match SSR markup: read localStorage only after mount — avoids hydration mismatch.
+  const [paneVisibility, setPaneVisibility] = useState<PaneVisibility>(() => ({
+    ...DEFAULT_PANE_VISIBILITY,
+  }));
   const skipNextSave = useRef(false);
 
   useEffect(() => {
     skipNextSave.current = true;
-    queueMicrotask(() => {
-      setPaneVisibility(loadPaneVisibility(projectId));
-    });
+    const id = requestAnimationFrame(() =>
+      setPaneVisibility(loadPaneVisibility(projectId)),
+    );
+    return () => cancelAnimationFrame(id);
   }, [projectId]);
 
   useEffect(() => {

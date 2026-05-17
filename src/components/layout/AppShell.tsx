@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useMemo } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import {
   Group,
   Panel,
@@ -36,6 +36,13 @@ type LayoutPersistence = Pick<
   Storage,
   "getItem" | "setItem" | "removeItem"
 >;
+
+/** Mirrors SSR layout persistence (nothing read from localStorage) until after hydration. */
+const NOOP_LAYOUT_STORAGE: LayoutPersistence = {
+  getItem: () => null,
+  setItem: () => {},
+  removeItem: () => {},
+};
 
 function safeLayoutStorage(): LayoutPersistence {
   if (typeof window === "undefined") {
@@ -89,11 +96,19 @@ export function AppShell({
     !paneVisibility.export &&
     !paneVisibility.timeline;
   const accent = themeAccent(theme);
+
+  const [persistLayoutReady, setPersistLayoutReady] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setPersistLayoutReady(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
   const storage = useMemo(() => {
-    const inner = safeLayoutStorage();
-    if (typeof window === "undefined") return inner;
-    return createSanitizingLayoutStorage(projectId, inner);
-  }, [projectId]);
+    // Server render + initial client hydration: must not read persisted flex % early.
+    if (typeof window === "undefined") return NOOP_LAYOUT_STORAGE;
+    if (!persistLayoutReady) return NOOP_LAYOUT_STORAGE;
+    return createSanitizingLayoutStorage(projectId, safeLayoutStorage());
+  }, [persistLayoutReady, projectId]);
 
   const horizontalLayout = useDefaultLayout({
     id: layoutGroupId(projectId, "horizontal"),
