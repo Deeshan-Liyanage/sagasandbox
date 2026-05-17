@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Copy, Loader2, X } from "lucide-react";
 import { cn } from "@/lib/cn";
+import type { SceneryLayoutPlan } from "@/lib/scenery-layout-plan";
 import { MAX_PROMPT_OVERRIDE_CHARS } from "@/lib/scenery-synthesize-request";
 import { toastError, toastSuccess } from "@/store/toast-store";
 
@@ -12,6 +13,8 @@ export interface SceneryPromptPreviewModalProps {
   /** Server-built default prompt shown when preview loads. */
   defaultPrompt: string | null;
   warnings: string[];
+  layoutPlan?: SceneryLayoutPlan | null;
+  wireframeThumbnail?: string | null;
   confirming: boolean;
   onClose: () => void;
   onConfirm: (editedPrompt: string) => void;
@@ -22,11 +25,14 @@ export function SceneryPromptPreviewModal({
   loading,
   defaultPrompt,
   warnings,
+  layoutPlan,
+  wireframeThumbnail,
   confirming,
   onClose,
   onConfirm,
 }: SceneryPromptPreviewModalProps) {
   const [editedPrompt, setEditedPrompt] = useState(() => defaultPrompt ?? "");
+  const [showLayoutJson, setShowLayoutJson] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -78,11 +84,11 @@ export function SceneryPromptPreviewModal({
               id="scenery-prompt-preview-title"
               className="text-sm font-semibold text-[#e5e7eb]"
             >
-              Scenery synthesis prompt
+              Scenery synthesis (Tier B)
             </h2>
             <p className="mt-0.5 text-xs text-[#9ca3af]">
-              Edit the full prompt sent to the image model, then confirm or
-              cancel.
+              Layout plan, wireframe, base map, and per-pin landmarks. Edit the
+              base-map prompt, then confirm.
             </p>
           </div>
           <button
@@ -104,11 +110,50 @@ export function SceneryPromptPreviewModal({
           </ul>
         ) : null}
 
+        {!loading && (wireframeThumbnail || layoutPlan) ? (
+          <div className="flex flex-wrap gap-4 border-b border-[#2a2a2e] px-4 py-3">
+            {wireframeThumbnail ? (
+              <div className="shrink-0">
+                <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-[#9ca3af]">
+                  Wireframe
+                </p>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={wireframeThumbnail}
+                  alt="Structure wireframe preview"
+                  className="h-24 w-auto rounded border border-[#2a2a2e] bg-[#0f0f12]"
+                />
+              </div>
+            ) : null}
+            {layoutPlan ? (
+              <div className="min-w-0 flex-1">
+                <button
+                  type="button"
+                  onClick={() => setShowLayoutJson((v) => !v)}
+                  className="mb-1 text-[10px] font-medium uppercase tracking-wide text-[#7c3aed] hover:underline"
+                >
+                  {showLayoutJson ? "Hide" : "Show"} layout plan JSON
+                </button>
+                {showLayoutJson ? (
+                  <pre className="max-h-28 overflow-auto rounded border border-[#2a2a2e] bg-[#0f0f12] p-2 font-mono text-[10px] text-[#9ca3af]">
+                    {JSON.stringify(layoutPlan, null, 2)}
+                  </pre>
+                ) : (
+                  <p className="text-xs text-[#9ca3af]">
+                    {layoutPlan.regions.length} region(s),{" "}
+                    {layoutPlan.landmarks.length} landmark(s)
+                  </p>
+                )}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         <div className="min-h-0 flex-1 overflow-hidden px-4 py-3">
           {loading ? (
             <div className="flex items-center justify-center gap-2 py-16 text-sm text-[#9ca3af]">
               <Loader2 className="h-4 w-4 animate-spin text-[#7c3aed]" />
-              Building prompt preview…
+              Planning layout & wireframe…
             </div>
           ) : (
             <textarea

@@ -1,6 +1,12 @@
+import "server-only";
+
 import { NextResponse } from "next/server";
 import { isAuthError, jsonError, requireAuth } from "@/lib/api-auth";
+import { generateSceneryLayoutPlan } from "@/lib/scenery-layout-plan";
+import { buildBaseMapPrompt } from "@/lib/scenery-pipeline-prompt";
+import { renderWireframeDataUrl } from "@/lib/scenery-wireframe";
 import {
+  resolveSceneryPrompt,
   resolveScenerySynthesis,
   validateScenerySynthesizeBody,
   type ScenerySynthesizeRequestBody,
@@ -35,12 +41,38 @@ export async function POST(request: Request, context: RouteContext) {
       );
     }
 
-    const { prompt, hasSketchReference, warnings } = resolved.data;
+    const { project, geospatial, synthesisUserNotes, warnings } = resolved.data;
+
+    const { plan: layoutPlan, source: layoutPlanSource } =
+      await generateSceneryLayoutPlan({
+        project,
+        geospatial,
+        synthesis_user_notes: synthesisUserNotes,
+      });
+
+    const builtPrompt = buildBaseMapPrompt(
+      project,
+      layoutPlan,
+      geospatial,
+      synthesisUserNotes,
+    );
+    const prompt = resolveSceneryPrompt(builtPrompt, body.prompt_override);
+
+    let wireframeThumbnail: string | null = null;
+    try {
+      wireframeThumbnail = await renderWireframeDataUrl(layoutPlan, geospatial);
+    } catch (err) {
+      console.warn("[scenery preview] wireframe render failed:", err);
+    }
 
     return NextResponse.json({
       prompt,
       default_prompt: prompt,
-      has_sketch_reference: hasSketchReference,
+      has_sketch_reference: true,
+      used_tier_b_pipeline: true,
+      layout_plan: layoutPlan,
+      layout_plan_source: layoutPlanSource,
+      wireframe_thumbnail: wireframeThumbnail,
       warnings,
     });
   } catch (err) {

@@ -170,6 +170,60 @@ export async function falQueue(
   }
 }
 
+/** Synchronous Fal generation (subscribe). Used for pipeline pin passes in poll handler. */
+export async function falGenerateSync(
+  options: FalQueueOptions,
+): Promise<string | null> {
+  if (!FAL_KEY) return null
+
+  const { prompt, imageUrl, width = 1024, height = 768 } = options
+  const model =
+    options.model ?? (imageUrl ? FLUX_IMG2IMG_MODEL : FLUX_TEXT_MODEL)
+
+  const input: Record<string, unknown> = { prompt }
+
+  if (isFluxProUltraModel(model)) {
+    input.aspect_ratio = "16:9"
+    input.num_images = 1
+    if (imageUrl) {
+      input.image_url = imageUrl
+      input.image_prompt_strength = options.strength ?? 0.85
+    }
+  } else if (imageUrl && isFluxDevImg2ImgModel(model)) {
+    input.image_size = { width, height }
+    input.num_inference_steps = 40
+    input.guidance_scale = 3.5
+    input.image_url = imageUrl
+    input.strength = options.strength ?? 0.88
+  } else {
+    input.image_size = { width, height }
+    if (!imageUrl) {
+      input.num_inference_steps = isFluxDevImg2ImgModel(model) ? 40 : 28
+      input.guidance_scale = 3.5
+    }
+    if (imageUrl) {
+      input.image_url = imageUrl
+      input.strength = options.strength ?? 0.88
+    }
+  }
+
+  try {
+    const result = await fal.subscribe(model, {
+      input,
+      pollInterval: 2000,
+      logs: false,
+    })
+    const data = result.data as {
+      images?: Array<{ url: string }>
+      image?: { url: string }
+    }
+    return data.images?.[0]?.url ?? data.image?.url ?? null
+  } catch (err) {
+    console.error("[fal] falGenerateSync failed:", err)
+    return null
+  }
+}
+
 export function buildPrompt(parts: {
   styleConfig: StyleConfig
   location?: string
@@ -191,9 +245,9 @@ export function buildPrompt(parts: {
 }
 
 export function projectStyleConfig(project: {
-  theme: string
-  aesthetic_style: string
-  style_config: unknown
+  theme?: string | null
+  aesthetic_style?: string | null
+  style_config?: unknown
 }): StyleConfig {
   const cfg =
     typeof project.style_config === "object" && project.style_config !== null
@@ -201,9 +255,9 @@ export function projectStyleConfig(project: {
       : {}
   return {
     ...cfg,
-    theme: cfg.theme ?? project.theme,
-    aesthetic_style: cfg.aesthetic_style ?? project.aesthetic_style,
-    aesthetic: cfg.aesthetic ?? project.aesthetic_style,
-    tone: cfg.tone ?? project.theme.replace(/_/g, " "),
+    theme: cfg.theme ?? project.theme ?? "unspecified",
+    aesthetic_style: cfg.aesthetic_style ?? project.aesthetic_style ?? "cinematic",
+    aesthetic: cfg.aesthetic ?? project.aesthetic_style ?? "cinematic",
+    tone: cfg.tone ?? (project.theme ?? "unspecified").replace(/_/g, " "),
   }
 }

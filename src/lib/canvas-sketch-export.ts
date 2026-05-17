@@ -67,7 +67,10 @@ function computeSketchBounds(lines: SketchLine[], pins: SketchPin[]) {
   return { minX, minY, maxX, maxY };
 }
 
-/** Rasterize brush strokes (+ optional pin markers) for Fal img2img reference. */
+/**
+ * Rasterize user brush strokes for geospatial context (Tier B uses
+ * `scenery-wireframe.ts` for structure reference — not this sketch).
+ */
 export function exportMapSketchToDataUrl(
   lines: SketchLine[],
   pins: SketchPin[] = [],

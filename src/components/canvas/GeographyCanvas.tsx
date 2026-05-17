@@ -50,6 +50,11 @@ import {
 import { cn } from "@/lib/cn";
 import { exportMapSketchToDataUrl } from "@/lib/canvas-sketch-export";
 import { buildGeospatialContext } from "@/lib/scenery-geospatial";
+import {
+  pipelineStageLabel,
+  type SceneryPipelineStage,
+} from "@/lib/scenery-pipeline-types";
+import type { SceneryLayoutPlan } from "@/lib/scenery-layout-plan";
 import { readApiError } from "@/lib/project-api";
 import { toastError, toastSuccess } from "@/store/toast-store";
 import { useCanvasAdvancedMode } from "@/hooks/useCanvasAdvancedMode";
@@ -237,6 +242,13 @@ export const GeographyCanvas = forwardRef<
   const [promptPreviewWarnings, setPromptPreviewWarnings] = useState<string[]>(
     [],
   );
+  const [promptPreviewLayoutPlan, setPromptPreviewLayoutPlan] =
+    useState<SceneryLayoutPlan | null>(null);
+  const [promptPreviewWireframe, setPromptPreviewWireframe] = useState<
+    string | null
+  >(null);
+  const [sceneryPipelineStage, setSceneryPipelineStage] =
+    useState<SceneryPipelineStage | null>(null);
   const [synthesisUserNotes, setSynthesisUserNotes] = useState("");
   const [sceneryPreviewUrl, setSceneryPreviewUrl] = useState<string | null>(
     null,
@@ -373,6 +385,7 @@ export const GeographyCanvas = forwardRef<
       const meta = extractCanvasMeta(state);
       canvasMetaRef.current = meta;
       setSceneryPreviewUrl(meta.scenery_preview_url ?? null);
+      setSceneryPipelineStage(meta.scenery_pipeline_stage ?? null);
       setDepthPreviewUrl(meta.depth_preview_url ?? null);
       setSynthesisUserNotes(meta.synthesis_user_notes ?? "");
       setSceneryTransform(
@@ -534,7 +547,11 @@ export const GeographyCanvas = forwardRef<
       scenery_preview_url?: string | null;
       depth_preview_url?: string | null;
       scenery_transform?: SceneryTransform | null;
+      scenery_pipeline_stage?: SceneryPipelineStage | null;
     }) => {
+      if (meta.scenery_pipeline_stage) {
+        setSceneryPipelineStage(meta.scenery_pipeline_stage);
+      }
       if (meta.depth_preview_url) {
         setDepthPreviewUrl(meta.depth_preview_url);
       }
@@ -1152,6 +1169,8 @@ export const GeographyCanvas = forwardRef<
     setPromptPreviewLoading(true);
     setPromptPreviewDefault(null);
     setPromptPreviewWarnings([]);
+    setPromptPreviewLayoutPlan(null);
+    setPromptPreviewWireframe(null);
 
     try {
       const res = await fetch(
@@ -1167,6 +1186,8 @@ export const GeographyCanvas = forwardRef<
         prompt?: string;
         default_prompt?: string;
         warnings?: string[];
+        layout_plan?: SceneryLayoutPlan;
+        wireframe_thumbnail?: string | null;
         error?: string;
       };
 
@@ -1178,6 +1199,8 @@ export const GeographyCanvas = forwardRef<
         data.default_prompt ?? data.prompt ?? "",
       );
       setPromptPreviewWarnings(data.warnings ?? []);
+      setPromptPreviewLayoutPlan(data.layout_plan ?? null);
+      setPromptPreviewWireframe(data.wireframe_thumbnail ?? null);
     } catch (err) {
       setPromptPreviewOpen(false);
       toastError(
@@ -1200,6 +1223,8 @@ export const GeographyCanvas = forwardRef<
     setPromptPreviewOpen(false);
     setPromptPreviewDefault(null);
     setPromptPreviewWarnings([]);
+    setPromptPreviewLayoutPlan(null);
+    setPromptPreviewWireframe(null);
   }, [synthesizing]);
 
   const handleSynthesizeScenery = useCallback(
@@ -1240,6 +1265,7 @@ export const GeographyCanvas = forwardRef<
         warnings?: string[];
         canvas_meta?: CanvasMeta;
         depth_preview_url?: string | null;
+        scenery_pipeline_stage?: string | null;
       };
 
       if (!res.ok) {
@@ -1249,9 +1275,17 @@ export const GeographyCanvas = forwardRef<
       const meta = data.canvas_meta;
       if (meta) {
         canvasMetaRef.current = { ...canvasMetaRef.current, ...meta };
+        if (meta.scenery_pipeline_stage) {
+          setSceneryPipelineStage(meta.scenery_pipeline_stage);
+        }
       }
       if (data.queued && meta?.scenery_preview_url === SCENERY_PENDING) {
         setSceneryPreviewUrl(SCENERY_PENDING);
+        setSceneryPipelineStage(
+          (meta?.scenery_pipeline_stage ??
+            data.scenery_pipeline_stage ??
+            "base") as SceneryPipelineStage,
+        );
         sceneryPendingStartedRef.current = Date.now();
       } else if (isSceneryPreviewResolved(meta?.scenery_preview_url)) {
         setSceneryPreviewUrl(meta!.scenery_preview_url!);
@@ -1425,6 +1459,8 @@ export const GeographyCanvas = forwardRef<
         loading={promptPreviewLoading}
         defaultPrompt={promptPreviewDefault}
         warnings={promptPreviewWarnings}
+        layoutPlan={promptPreviewLayoutPlan}
+        wireframeThumbnail={promptPreviewWireframe}
         confirming={synthesizing}
         onClose={handleCloseSynthesisPreview}
         onConfirm={handleConfirmSynthesisFromPreview}
@@ -1445,7 +1481,7 @@ export const GeographyCanvas = forwardRef<
       {sceneryPreviewUrl === SCENERY_PENDING ? (
         <div className="pointer-events-none absolute inset-x-4 top-4 z-[2] rounded-md border border-[#7c3aed]/40 bg-[#7c3aed]/15 px-3 py-2 text-center text-xs text-[#e5e7eb]">
           <span className="inline-block animate-pulse">
-            Generating scenery preview…
+            {pipelineStageLabel(sceneryPipelineStage)}
           </span>
         </div>
       ) : null}

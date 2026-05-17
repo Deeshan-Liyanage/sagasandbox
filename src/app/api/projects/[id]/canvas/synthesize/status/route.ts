@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isAuthError, jsonError, requireAuth } from "@/lib/api-auth";
-import { pollAndCompleteScenery } from "@/lib/scenery-synthesis";
+import { pollAndCompleteScenery } from "@/lib/scenery-synthesis-poll";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
