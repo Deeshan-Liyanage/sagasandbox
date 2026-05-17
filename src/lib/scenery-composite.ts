@@ -11,6 +11,22 @@ import type { SceneryGeospatialContext } from "@/lib/scenery-prompt";
 
 const DEFAULT_LANDMARK_RADIUS = 96;
 
+async function softDiscAlphaMask(diameter: number): Promise<Buffer> {
+  const r = diameter / 2;
+  const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${diameter}" height="${diameter}">
+  <defs>
+    <radialGradient id="edge" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="white" stop-opacity="1"/>
+      <stop offset="78%" stop-color="white" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="white" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <circle cx="${r}" cy="${r}" r="${r}" fill="url(#edge)"/>
+</svg>`;
+  return sharp(Buffer.from(svg)).ensureAlpha().png().toBuffer();
+}
+
 export interface LandmarkCompositeInput {
   pinIndex: number;
   imageBuffer: Buffer;
@@ -26,6 +42,7 @@ export async function compositeLandmarksOntoBase(
   const radius = options?.radius ?? DEFAULT_LANDMARK_RADIUS;
   const diameter = radius * 2;
   const projection = computeMapProjection(geospatial);
+  const discMask = await softDiscAlphaMask(diameter);
 
   const base = sharp(baseImage).resize(
     SCENERY_EXPORT_WIDTH,
@@ -43,8 +60,12 @@ export async function compositeLandmarksOntoBase(
     const left = Math.round(Math.max(0, Math.min(SCENERY_EXPORT_WIDTH - diameter, x - radius)));
     const top = Math.round(Math.max(0, Math.min(SCENERY_EXPORT_HEIGHT - diameter, y - radius)));
 
-    const tile = await sharp(item.imageBuffer)
+    const cover = await sharp(item.imageBuffer)
       .resize(diameter, diameter, { fit: "cover" })
+      .ensureAlpha();
+
+    const tile = await cover
+      .composite([{ input: discMask, blend: "dest-in" }])
       .png()
       .toBuffer();
 

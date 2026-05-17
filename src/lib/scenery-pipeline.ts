@@ -8,7 +8,6 @@ import { uploadCanvasSketchDataUrl } from "@/lib/canvas-sketch-upload";
 import {
   falGenerateSync,
   falQueue,
-  FLUX_TEXT_MODEL,
   projectStyleConfig,
   SCENERY_FLUX_IMG2IMG_MODEL,
   SCENERY_FLUX_TEXT_MODEL,
@@ -147,7 +146,7 @@ export async function runPinCompositeStage(
 
     const imageUrl = await falGenerateSync({
       prompt,
-      model: FLUX_TEXT_MODEL,
+      model: SCENERY_FLUX_TEXT_MODEL,
       width: 512,
       height: 512,
     });
@@ -165,11 +164,11 @@ export async function runPinCompositeStage(
 
   let finalJpeg = compositeJpeg;
   let workingCanvasState = canvasState;
-  const harmonizeEnabled =
-    process.env.SCENERY_ENABLE_HARMONIZE === "true" &&
-    Boolean(process.env.FAL_KEY?.trim());
+  const harmonizeDisabled =
+    process.env.SCENERY_DISABLE_HARMONIZE === "true" ||
+    !process.env.FAL_KEY?.trim();
 
-  if (harmonizeEnabled) {
+  if (!harmonizeDisabled) {
     await updateProjectSceneryMeta(supabase, projectId, workingCanvasState, {
       scenery_pipeline_stage: "harmonize",
     });
@@ -188,6 +187,7 @@ export async function runPinCompositeStage(
       const harmonizePrompt = [
         "Unify lighting, shadows, and color grading across this entire story map.",
         "Keep geography and landmark placements unchanged; seamless blending.",
+        "Match the base map's illustrative or cartographic treatment — avoid glossy stock-photo or hyperreal drone look unless the base is explicitly photoreal.",
         `${style.aesthetic_style} look, ${style.theme} tone.`,
         "No typography or readable labels.",
       ].join(" ");
@@ -198,7 +198,7 @@ export async function runPinCompositeStage(
         imageUrl: preUrl,
         width: 1280,
         height: 720,
-        strength: 0.38,
+        strength: 0.32,
       });
       const harmonizedBuf = harmonizedUrl
         ? await fetchImageBuffer(harmonizedUrl)

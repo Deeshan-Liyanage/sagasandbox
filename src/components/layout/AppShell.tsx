@@ -21,17 +21,24 @@ import { PaneResizeHandle } from "@/components/layout/PaneResizeHandle";
 import { cn } from "@/lib/cn";
 import { themeAccent } from "@/lib/constants";
 import {
+  createSanitizingLayoutStorage,
   layoutGroupId,
   type LayoutPresetId,
   type PaneVisibility,
   type WorkspacePaneId,
 } from "@/lib/workspace-panes";
 
-function safeLayoutStorage(): Pick<Storage, "getItem" | "setItem"> {
+type LayoutPersistence = Pick<
+  Storage,
+  "getItem" | "setItem" | "removeItem"
+>;
+
+function safeLayoutStorage(): LayoutPersistence {
   if (typeof window === "undefined") {
     return {
       getItem: () => null,
       setItem: () => {},
+      removeItem: () => {},
     };
   }
   return localStorage;
@@ -73,8 +80,16 @@ export function AppShell({
   headerActions,
   onExportClick,
 }: AppShellProps) {
+  const focusCanvasActive =
+    !paneVisibility.vault &&
+    !paneVisibility.export &&
+    !paneVisibility.timeline;
   const accent = themeAccent(theme);
-  const storage = useMemo(() => safeLayoutStorage(), []);
+  const storage = useMemo(() => {
+    const inner = safeLayoutStorage();
+    if (typeof window === "undefined") return inner;
+    return createSanitizingLayoutStorage(projectId, inner);
+  }, [projectId]);
 
   const horizontalLayout = useDefaultLayout({
     id: layoutGroupId(projectId, "horizontal"),
@@ -147,8 +162,8 @@ export function AppShell({
             <option value="" disabled>
               Layout presets
             </option>
-            <option value="default">Default</option>
             <option value="focus-canvas">Focus canvas</option>
+            <option value="balanced">Balanced</option>
             <option value="full">Full workspace</option>
           </select>
           {headerActions}
@@ -172,7 +187,7 @@ export function AppShell({
           <RailIconButton
             label="Focus canvas"
             icon={RAIL_ICONS.canvas}
-            active={false}
+            active={focusCanvasActive}
             onClick={() => onApplyLayoutPreset("focus-canvas")}
           />
           <RailIconButton
@@ -205,7 +220,7 @@ export function AppShell({
           <Panel
             id="main"
             className="min-h-0 min-w-0"
-            defaultSize={72}
+            defaultSize={78}
             minSize={35}
           >
             <Group
@@ -222,7 +237,7 @@ export function AppShell({
                 collapsible
                 collapsedSize={0}
                 minSize={12}
-                defaultSize={18}
+                defaultSize={16}
               >
                 <WorkspacePaneChrome title="Character vault" bodyClassName="overflow-y-auto">
                   {vaultContent}
@@ -232,7 +247,7 @@ export function AppShell({
               <Panel
                 id="canvas"
                 className="min-h-0 min-w-0"
-                defaultSize={64}
+                defaultSize={68}
                 minSize={28}
               >
                 <div className="relative h-full min-h-0 w-full min-w-0 overflow-hidden bg-[#0f0f12]">
@@ -247,7 +262,7 @@ export function AppShell({
                 collapsible
                 collapsedSize={0}
                 minSize={12}
-                defaultSize={18}
+                defaultSize={16}
               >
                 <WorkspacePaneChrome title="Export" bodyClassName="overflow-y-auto">
                   {exportContent}
@@ -265,7 +280,7 @@ export function AppShell({
             collapsible
             collapsedSize={0}
             minSize={14}
-            defaultSize={28}
+            defaultSize={22}
           >
             <WorkspacePaneChrome
               title="Timeline"

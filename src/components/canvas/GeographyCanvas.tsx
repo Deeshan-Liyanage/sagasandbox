@@ -49,6 +49,7 @@ import {
 } from "@/lib/scenery-synthesis";
 import { cn } from "@/lib/cn";
 import { exportMapSketchToDataUrl } from "@/lib/canvas-sketch-export";
+import { alignedSceneryTransformForGeospatial } from "@/lib/scenery-coords";
 import { buildGeospatialContext } from "@/lib/scenery-geospatial";
 import {
   pipelineStageLabel,
@@ -59,7 +60,10 @@ import { readApiError } from "@/lib/project-api";
 import { toastError, toastSuccess } from "@/store/toast-store";
 import { useCanvasAdvancedMode } from "@/hooks/useCanvasAdvancedMode";
 import { PinCreator } from "./PinCreator";
+import { MapPinsList } from "./MapPinsList";
 import { SceneryPromptPreviewModal } from "./SceneryPromptPreviewModal";
+
+type MapExportVariant = "clean" | "overlay";
 
 /** Map = draw + pins + gestures; Eraser / Scenery are optional overlays. */
 export type CanvasTool = "map" | "eraser" | "scenery";
@@ -76,6 +80,8 @@ export interface GeographyCanvasProps {
   userId?: string;
   apiAvailable?: boolean;
   highlightedPinId?: string | null;
+  /** Selected pin shown in map sidebar (vs timeline-only highlight). */
+  sidebarSelectedPinId?: string | null;
 }
 
 export interface GeographyCanvasHandle {
@@ -180,6 +186,7 @@ export const GeographyCanvas = forwardRef<
     userId = "local",
     apiAvailable = true,
     highlightedPinId = null,
+    sidebarSelectedPinId = null,
   },
   ref,
 ) {
@@ -187,6 +194,8 @@ export const GeographyCanvas = forwardRef<
   const stageRef = useRef<Konva.Stage>(null);
   const sceneryImageRef = useRef<Konva.Image>(null);
   const sceneryTransformerRef = useRef<Konva.Transformer>(null);
+  const mapContentLayerRef = useRef<Konva.Layer>(null);
+  const peerCursorsGroupRef = useRef<Konva.Group>(null);
   const canvasMetaRef = useRef<CanvasMeta>({});
   const cursorThrottleRef = useRef(0);
   const hydratedStateKeyRef = useRef<string | null>(null);
@@ -342,7 +351,10 @@ export const GeographyCanvas = forwardRef<
           p.id === pin.id ? { ...p, canvas_x, canvas_y } : p,
         ),
       );
-      if (highlightedPinId === pin.id) {
+      if (
+        highlightedPinId === pin.id ||
+        sidebarSelectedPinId === pin.id
+      ) {
         onPinSelect({ ...pin, canvas_x, canvas_y });
       }
       if (!apiAvailable) return;
@@ -375,7 +387,122 @@ export const GeographyCanvas = forwardRef<
       onPinsChange,
       onPinSelect,
       highlightedPinId,
+      sidebarSelectedPinId,
     ],
+  );
+
+  const focusPinOnViewport = useCallback(
+    (pin: LocationPin) => {
+      const cw = size.width;
+      const ch = size.height;
+      const sx = cw / 2 - pin.canvas_x * scale;
+      const sy = ch / 2 - pin.canvas_y * scale;
+      setStagePos({ x: sx, y: sy });
+      const stage = stageRef.current;
+      if (stage && !panSessionRef.current && !isPanning) {
+        stage.position({ x: sx, y: sy });
+        stage.batchDraw();
+      }
+      requestAnimationFrame(() => {
+        persistCanvas();
+      });
+      onPinSelect(pin);
+    },
+    [
+      size.width,
+      size.height,
+      scale,
+      persistCanvas,
+      onPinSelect,
+      isPanning,
+    ],
+  );
+
+  const exportMapToPng = useCallback(
+    (variant: MapExportVariant) => {
+      const stage = stageRef.current;
+      const sceneryNode = sceneryImageRef.current;
+      const contentLayer = mapContentLayerRef.current;
+      const tr = sceneryTransformerRef.current;
+      const peers = peerCursorsGroupRef.current;
+
+      if (!stage || !contentLayer) {
+        toastError("Map is not ready to export.");
+        return;
+      }
+
+      const revert: Array<() => void> = [];
+
+      const runRevert = () => {
+        revert.reverse().forEach((fn) => fn());
+        stage.batchDraw();
+      };
+
+      try {
+        const lineShapes =
+          variant === "overlay" ? contentLayer.find("Line") : [];
+
+        if (variant === "overlay") {
+          for (const ln of lineShapes) {
+            const prev = ln.opacity();
+            revert.push(() => ln.opacity(prev));
+            ln.opacity(1);
+          }
+          if (hasSceneryImage && sceneryNode) {
+            const prev = sceneryNode.opacity();
+            revert.push(() => sceneryNode.opacity(prev));
+            sceneryNode.opacity(1);
+          }
+        } else {
+          if (hasSceneryImage && sceneryNode) {
+            const prev = sceneryNode.opacity();
+            revert.push(() => sceneryNode.opacity(prev));
+            sceneryNode.opacity(1);
+          }
+          const contentVisible = contentLayer.visible();
+          revert.push(() => contentLayer.visible(contentVisible));
+          contentLayer.visible(false);
+        }
+
+        if (peers) {
+          const v = peers.visible();
+          revert.push(() => peers.visible(v));
+          peers.visible(false);
+        }
+
+        if (tr) {
+          const tv = tr.visible();
+          revert.push(() => tr.visible(tv));
+          tr.visible(false);
+        }
+
+        stage.batchDraw();
+        const dataUrl = stage.toDataURL({ pixelRatio: 2, mimeType: "image/png" });
+
+        runRevert();
+
+        const a = document.createElement("a");
+        a.href = dataUrl;
+        const suffix =
+          variant === "clean" ? "map-only" : "map-with-overlay";
+        a.download = `sagasandbox-${projectId.slice(0, 8)}-${suffix}.png`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+
+        toastSuccess(
+          variant === "clean"
+            ? "Exported map layers (pins and sketches hidden)."
+            : "Exported map with pins and sketches.",
+        );
+      } catch (err) {
+        runRevert();
+        toastError(
+          err instanceof Error ? err.message : "Could not export the map.",
+        );
+      }
+    },
+    [hasSceneryImage, projectId],
   );
 
   const hydrateFromState = useCallback(
@@ -495,7 +622,11 @@ export const GeographyCanvas = forwardRef<
       return;
     }
 
-    const urlChanged = sceneryImageUrl !== lastSceneryUrlRef.current;
+    const prevUrl = lastSceneryUrlRef.current;
+    const urlChanged =
+      prevUrl !== null &&
+      sceneryImageUrl !== null &&
+      sceneryImageUrl !== prevUrl;
     lastSceneryUrlRef.current = sceneryImageUrl;
 
     const img = new window.Image();
@@ -503,12 +634,15 @@ export const GeographyCanvas = forwardRef<
     img.onload = () => {
       setSceneryImage(img);
       if (urlChanged || !canvasMetaRef.current.scenery_transform) {
-        const next = defaultSceneryTransform(
-          size.width,
-          size.height,
-          img.naturalWidth,
-          img.naturalHeight,
-        );
+        const geo = canvasMetaRef.current.scenery_pipeline_geospatial;
+        const next = geo
+          ? alignedSceneryTransformForGeospatial(geo)
+          : defaultSceneryTransform(
+              size.width,
+              size.height,
+              img.naturalWidth,
+              img.naturalHeight,
+            );
         setSceneryTransform(next);
         canvasMetaRef.current = {
           ...canvasMetaRef.current,
@@ -1399,6 +1533,38 @@ export const GeographyCanvas = forwardRef<
             Scenery
           </button>
         ) : null}
+        <details className="group relative shrink-0">
+          <summary
+            className="cursor-pointer select-none rounded-md px-3 py-1.5 text-xs font-medium text-[#a78bfa] hover:bg-[#7c3aed]/20 [&::-webkit-details-marker]:hidden"
+            title="Download the visible map viewport as PNG"
+          >
+            Export map ▾
+          </summary>
+          <div className="absolute bottom-full left-1/2 z-20 mb-1 flex min-w-[220px] -translate-x-1/2 flex-col gap-px rounded-md border border-[#2a2a2e] bg-[#141418] py-1 shadow-xl">
+            <button
+              type="button"
+              className="px-3 py-2 text-left text-[11px] text-[#e5e7eb] hover:bg-[#2a2a2e]"
+              onClick={() => exportMapToPng("clean")}
+            >
+              PNG — scenery only{" "}
+              <span className="mt-0.5 block font-normal text-[#9ca3af]">
+                Hides violet strokes and pins; shows generated backdrop at full
+                strength (same camera & zoom).
+              </span>
+            </button>
+            <button
+              type="button"
+              className="px-3 py-2 text-left text-[11px] text-[#e5e7eb] hover:bg-[#2a2a2e]"
+              onClick={() => exportMapToPng("overlay")}
+            >
+              PNG — pins & sketches
+              <span className="mt-0.5 block font-normal text-[#9ca3af]">
+                Includes pins and brush strokes; backdrop at full overlay
+                strength (same camera & zoom).
+              </span>
+            </button>
+          </div>
+        </details>
         {apiAvailable ? (
           <>
             <input
@@ -1457,6 +1623,7 @@ export const GeographyCanvas = forwardRef<
       promptPreviewLoading,
       advancedMode,
       toggleAdvancedMode,
+      exportMapToPng,
     ],
   );
 
@@ -1467,6 +1634,13 @@ export const GeographyCanvas = forwardRef<
       className="relative h-full w-full overflow-hidden bg-[#0e0e0f] outline-none"
       onPointerDown={() => containerRef.current?.focus({ preventScroll: true })}
     >
+      <MapPinsList
+        pins={pins}
+        highlightedPinId={highlightedPinId ?? undefined}
+        activePinId={sidebarSelectedPinId ?? undefined}
+        onPinSelect={onPinSelect}
+        onFocusPin={focusPinOnViewport}
+      />
       <SceneryPromptPreviewModal
         key={promptPreviewDefault ?? (promptPreviewLoading ? "loading" : "empty")}
         open={promptPreviewOpen}
@@ -1503,6 +1677,12 @@ export const GeographyCanvas = forwardRef<
         <p className="pointer-events-none absolute inset-x-4 bottom-20 z-[2] text-center text-[10px] text-[#6b7280]">
           Drag to draw · Click empty map to add pin · Hold Space, Alt, or Shift
           and drag to pan · Middle / right mouse drag to pan
+          {hasSceneryImage ? (
+            <span className="block text-[#5b6577]">
+              Sketch stroke overlay is dimmed while scenery is visible; pins stay
+              aligned to the map when Tier&nbsp;B geospatial data is present.
+            </span>
+          ) : null}
         </p>
       ) : null}
       {toolbar}
@@ -1583,7 +1763,7 @@ export const GeographyCanvas = forwardRef<
             </>
           ) : null}
         </Layer>
-        <Layer>
+        <Layer ref={mapContentLayerRef}>
           {lines.map((line) => (
             <Line
               key={line.id}
@@ -1594,21 +1774,29 @@ export const GeographyCanvas = forwardRef<
               tension={0.4}
               lineCap="round"
               lineJoin="round"
+              opacity={hasSceneryImage ? 0.38 : 1}
               listening={tool !== "scenery"}
             />
           ))}
-          {Object.entries(peerCursors).map(([peerId, cursor]) => (
-            <Group key={`cursor-${peerId}`} x={cursor.x} y={cursor.y}>
-              <Circle radius={6} fill="#10b981" stroke="#0e0e0f" strokeWidth={2} />
-              <Text
-                text="Collaborator"
-                fontSize={10}
-                fill="#10b981"
-                y={10}
-                offsetX={28}
-              />
-            </Group>
-          ))}
+          <Group ref={peerCursorsGroupRef} listening={false}>
+            {Object.entries(peerCursors).map(([peerId, cursor]) => (
+              <Group key={`cursor-${peerId}`} x={cursor.x} y={cursor.y}>
+                <Circle
+                  radius={6}
+                  fill="#10b981"
+                  stroke="#0e0e0f"
+                  strokeWidth={2}
+                />
+                <Text
+                  text="Collaborator"
+                  fontSize={10}
+                  fill="#10b981"
+                  y={10}
+                  offsetX={28}
+                />
+              </Group>
+            ))}
+          </Group>
           {pins.map((pin) => (
             <Group
               key={pin.id}
@@ -1638,8 +1826,18 @@ export const GeographyCanvas = forwardRef<
               <Circle
                 radius={10}
                 fill={pinColor(pin.gen_status)}
-                stroke={highlightedPinId === pin.id ? "#7c3aed" : "#0e0e0f"}
-                strokeWidth={highlightedPinId === pin.id ? 3 : 2}
+                stroke={
+                  highlightedPinId === pin.id ||
+                  sidebarSelectedPinId === pin.id
+                    ? "#7c3aed"
+                    : "#0e0e0f"
+                }
+                strokeWidth={
+                  highlightedPinId === pin.id ||
+                  sidebarSelectedPinId === pin.id
+                    ? 3
+                    : 2
+                }
                 shadowBlur={pin.gen_status === "generating" ? 8 : 0}
               />
               <Text
