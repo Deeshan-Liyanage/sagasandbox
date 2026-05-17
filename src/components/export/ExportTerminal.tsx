@@ -117,7 +117,7 @@ export function ExportTerminal({
     if (!apiAvailable) return;
     setRecentLoading(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/exports`);
+      const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/exports`);
       if (!res.ok) {
         throw new Error(await readApiError(res, "Could not load exports"));
       }
@@ -150,7 +150,7 @@ export function ExportTerminal({
     setExportStatus(null);
     setCurrentExportId(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/exports`, {
+      const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/exports`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -188,7 +188,7 @@ export function ExportTerminal({
     const interval = setInterval(async () => {
       try {
         const res = await fetch(
-          `/api/projects/${projectId}/exports/${currentExportId}`,
+          `/api/projects/${encodeURIComponent(projectId)}/exports/${encodeURIComponent(currentExportId)}`,
         );
         if (!res.ok) return;
         const data = (await res.json()) as {
@@ -218,7 +218,7 @@ export function ExportTerminal({
     if (!apiAvailable) return;
     setDownloadingId(expId);
     try {
-      const res = await fetch(`/api/projects/${projectId}/exports/${expId}`);
+      const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/exports/${encodeURIComponent(expId)}`);
       if (!res.ok) {
         toastError(await readApiError(res, "Download lookup failed"));
         return;

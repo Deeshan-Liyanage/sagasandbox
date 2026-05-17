@@ -15,14 +15,29 @@ export async function readApiError(
   res: Response,
   fallback: string,
 ): Promise<string> {
+  const text = await res.text();
+
   try {
-    const body = (await res.json()) as { error?: string };
-    if (body.error) return body.error;
+    const body = JSON.parse(text) as { error?: string; message?: string };
+    if (typeof body.error === "string" && body.error.length > 0) {
+      return body.error;
+    }
+    if (typeof body.message === "string" && body.message.length > 0) {
+      return body.message;
+    }
   } catch {
-    // ignore parse errors
+    // Proxies/CDNs sometimes return HTML for 404/502 — JSON parse fails intentionally.
   }
+
+  const sniff = text.trimStart();
+  const nonJsonHint =
+    sniff.startsWith("<") || sniff.includes("<!DOCTYPE")
+      ? " The server replied with HTML instead of JSON (often a stale deploy or blocked API route)."
+      : "";
+
   if (res.status === 404) {
-    return "Project API is not available. Check your deployment or sign in.";
+    return `${fallback}: not found (404).${nonJsonHint} Refresh the Export list or reload the workspace.`;
   }
-  return fallback;
+
+  return nonJsonHint ? `${fallback}.${nonJsonHint}` : fallback;
 }

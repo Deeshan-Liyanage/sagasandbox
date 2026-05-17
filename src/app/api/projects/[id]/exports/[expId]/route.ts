@@ -1,43 +1,84 @@
 import { NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { isAuthError, jsonError, requireAuth } from "@/lib/api-auth";
+import {
+  normalizeUuidParam,
+  parseSupabaseStorageObjectRef,
+} from "@/lib/supabase-storage-object-path";
+import type { Database } from "@/types/db";
 
 type RouteContext = { params: Promise<{ id: string; expId: string }> };
+
+async function deriveFreshSignedDownloadUrl(
+  supabase: SupabaseClient<Database>,
+  outputUrl: string,
+): Promise<string | undefined> {
+  const out = outputUrl.trim();
+  if (!out) return undefined;
+
+  if (!/^https?:\/\//i.test(out)) {
+    const objectPath = out.replace(/^\/+/, "");
+    const { data: bareSigned } = await supabase.storage
+      .from("exports")
+      .createSignedUrl(objectPath, 3600);
+    return bareSigned?.signedUrl ?? undefined;
+  }
+
+  const ref = parseSupabaseStorageObjectRef(out);
+  if (ref) {
+    const { data: refreshed } = await supabase.storage
+      .from(ref.bucket)
+      .createSignedUrl(ref.objectPath, 3600);
+    return refreshed?.signedUrl ?? undefined;
+  }
+
+  return out;
+}
 
 export async function GET(_request: Request, context: RouteContext) {
   const auth = await requireAuth();
   if (isAuthError(auth)) return auth;
   const { supabase } = auth;
-  const { id: projectId, expId } = await context.params;
+  const { id: projectIdRaw, expId: expIdRaw } = await context.params;
+  const projectId = normalizeUuidParam(projectIdRaw);
+  const expId = normalizeUuidParam(expIdRaw);
 
   try {
-    const { data: exportRow, error } = await supabase
+    const { data: exportRow, error: selErr } = await supabase
       .from("exports")
       .select("*")
       .eq("id", expId)
-      .eq("project_id", projectId)
-      .single();
+      .maybeSingle();
 
-    if (error || !exportRow) {
+    if (selErr) {
+      return NextResponse.json(
+        { error: selErr.message ?? "Failed to load export row" },
+        { status: 500 },
+      );
+    }
+
+    if (!exportRow) {
       return NextResponse.json({ error: "Export not found" }, { status: 404 });
+    }
+
+    const rowProjectId = normalizeUuidParam(exportRow.project_id as string);
+    if (rowProjectId !== projectId) {
+      return NextResponse.json(
+        { error: "Export does not belong to this project." },
+        { status: 403 },
+      );
     }
 
     let signed_url: string | undefined;
 
     if (exportRow.status === "done" && exportRow.output_url) {
       try {
-        const url = new URL(exportRow.output_url);
-        const pathParts = url.pathname.split("/storage/v1/object/public/");
-        const storagePath = pathParts[1];
-        if (storagePath) {
-          const [bucket, ...rest] = storagePath.split("/");
-          const objectPath = rest.join("/");
-          const { data: signed } = await supabase.storage
-            .from(bucket)
-            .createSignedUrl(objectPath, 3600);
-          signed_url = signed?.signedUrl;
-        }
+        signed_url = await deriveFreshSignedDownloadUrl(
+          supabase,
+          exportRow.output_url as string,
+        );
       } catch {
-        signed_url = exportRow.output_url;
+        signed_url = exportRow.output_url as string;
       }
     }
 
