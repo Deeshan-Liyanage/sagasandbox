@@ -45,6 +45,10 @@ export function normalizeSceneryTransform(
   };
 }
 
+import type { SceneryGeospatialContext } from "@/lib/scenery-prompt";
+import type { SceneryLayoutPlan } from "@/lib/scenery-layout-plan";
+import type { SceneryPipelineStage } from "@/lib/scenery-pipeline-types";
+
 export interface CanvasMeta {
   scenery_preview_url?: string | null;
   depth_preview_url?: string | null;
@@ -53,6 +57,16 @@ export interface CanvasMeta {
   last_synthesis_at?: string | null;
   scenery_transform?: SceneryTransform | null;
   synthesis_user_notes?: string | null;
+  /** Tier B multi-step pipeline (v2). */
+  scenery_pipeline_version?: number;
+  scenery_pipeline_stage?: SceneryPipelineStage | null;
+  scenery_pipeline_request_ids?: string[];
+  scenery_layout_plan?: SceneryLayoutPlan | null;
+  scenery_layout_plan_source?: "llm" | "heuristic" | null;
+  scenery_wireframe_url?: string | null;
+  scenery_base_map_url?: string | null;
+  scenery_base_prompt?: string | null;
+  scenery_pipeline_geospatial?: SceneryGeospatialContext | null;
 }
 
 const META_KEYS: (keyof CanvasMeta)[] = [
@@ -63,7 +77,26 @@ const META_KEYS: (keyof CanvasMeta)[] = [
   "last_synthesis_at",
   "scenery_transform",
   "synthesis_user_notes",
+  "scenery_pipeline_version",
+  "scenery_pipeline_stage",
+  "scenery_pipeline_request_ids",
+  "scenery_layout_plan",
+  "scenery_layout_plan_source",
+  "scenery_wireframe_url",
+  "scenery_base_map_url",
+  "scenery_base_prompt",
+  "scenery_pipeline_geospatial",
 ];
+
+const PIPELINE_STAGES = new Set<string>([
+  "planning",
+  "wireframe",
+  "base",
+  "pins",
+  "harmonize",
+  "complete",
+  "error",
+]);
 
 type KonvaNode = {
   className?: string;
@@ -104,8 +137,58 @@ function pickMeta(source: Record<string, unknown>): CanvasMeta {
       } else if (key === "synthesis_user_notes") {
         meta.synthesis_user_notes =
           typeof value === "string" ? value : value === null ? null : undefined;
-      } else {
-        meta[key] = value as CanvasMeta[typeof key];
+      } else if (key === "scenery_pipeline_stage") {
+        meta.scenery_pipeline_stage =
+          typeof value === "string" && PIPELINE_STAGES.has(value)
+            ? (value as SceneryPipelineStage)
+            : value === null
+              ? null
+              : undefined;
+      } else if (key === "scenery_layout_plan") {
+        meta.scenery_layout_plan =
+          value && typeof value === "object"
+            ? (value as SceneryLayoutPlan)
+            : value === null
+              ? null
+              : undefined;
+      } else if (key === "scenery_pipeline_geospatial") {
+        meta.scenery_pipeline_geospatial =
+          value && typeof value === "object"
+            ? (value as SceneryGeospatialContext)
+            : value === null
+              ? null
+              : undefined;
+      } else if (key === "scenery_pipeline_request_ids") {
+        meta.scenery_pipeline_request_ids = Array.isArray(value)
+          ? value.filter((id): id is string => typeof id === "string")
+          : undefined;
+      } else if (key === "scenery_pipeline_version") {
+        meta.scenery_pipeline_version =
+          typeof value === "number" ? value : undefined;
+      } else if (
+        key === "scenery_wireframe_url" ||
+        key === "scenery_base_map_url" ||
+        key === "scenery_base_prompt"
+      ) {
+        const str = value as string | null | undefined;
+        if (typeof str === "string" || str === null) {
+          meta[key] = str;
+        }
+      } else if (key === "scenery_layout_plan_source") {
+        if (value === "llm" || value === "heuristic" || value === null) {
+          meta.scenery_layout_plan_source = value;
+        }
+      } else if (
+        key === "scenery_preview_url" ||
+        key === "depth_preview_url" ||
+        key === "scenery_fal_request_id" ||
+        key === "scenery_fal_model" ||
+        key === "last_synthesis_at"
+      ) {
+        const str = value as string | null | undefined;
+        if (typeof str === "string" || str === null) {
+          meta[key] = str;
+        }
       }
     }
   }

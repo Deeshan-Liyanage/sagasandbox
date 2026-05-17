@@ -92,13 +92,18 @@ async function markSceneryError(requestId: string) {
   const sceneryProject = await findSceneryProject(requestId)
   if (!sceneryProject?.canvas_state) return
 
-  const nextState = patchSceneryState(
-    sceneryProject.canvas_state as Record<string, unknown>,
-    {
-      scenery_preview_url: "error",
-      scenery_fal_request_id: null,
-    },
-  )
+  const raw = sceneryProject.canvas_state as Record<string, unknown>
+  const meta =
+    typeof raw.meta === "object" && raw.meta !== null
+      ? (raw.meta as Record<string, unknown>)
+      : raw
+  const isTierB = meta.scenery_pipeline_version === 2
+
+  const nextState = patchSceneryState(raw, {
+    scenery_preview_url: "error",
+    scenery_fal_request_id: null,
+    ...(isTierB ? { scenery_pipeline_stage: "error" } : {}),
+  })
 
   await supabase
     .from("projects")
@@ -253,13 +258,25 @@ Deno.serve(async (req) => {
     const sceneryProject = await findSceneryProject(request_id)
 
     if (sceneryProject?.canvas_state) {
-      const nextState = patchSceneryState(
-        sceneryProject.canvas_state as Record<string, unknown>,
-        {
-          scenery_preview_url: storageUrl,
-          scenery_fal_request_id: null,
-        },
-      )
+      const raw = sceneryProject.canvas_state as Record<string, unknown>
+      const meta =
+        typeof raw.meta === "object" && raw.meta !== null
+          ? (raw.meta as Record<string, unknown>)
+          : raw
+      const isTierB =
+        meta.scenery_pipeline_version === 2 &&
+        meta.scenery_pipeline_stage === "base"
+
+      const nextState = patchSceneryState(raw, isTierB
+        ? {
+            scenery_base_map_url: storageUrl,
+            scenery_pipeline_stage: "pins",
+            scenery_fal_request_id: null,
+          }
+        : {
+            scenery_preview_url: storageUrl,
+            scenery_fal_request_id: null,
+          })
 
       await supabase
         .from("projects")
