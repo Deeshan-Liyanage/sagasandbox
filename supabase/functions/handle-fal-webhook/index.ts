@@ -37,6 +37,26 @@ type FalWebhookPayload = {
   payload?: unknown
   output?: unknown
   error?: string
+  detail?: string
+  message?: string
+}
+
+function extractFalErrorMessage(body: FalWebhookPayload): string {
+  const candidates = [body.error, body.detail, body.message].filter(
+    (v): v is string => typeof v === "string" && v.length > 0,
+  )
+  if (candidates.length > 0) return candidates[0]
+  const payload = body.payload as Record<string, unknown> | undefined
+  if (payload && typeof payload === "object") {
+    const detail = payload.detail
+    if (typeof detail === "string") return detail
+    if (Array.isArray(detail)) {
+      const first = detail[0] as Record<string, unknown> | undefined
+      const msg = first?.msg
+      if (typeof msg === "string") return msg
+    }
+  }
+  return "Luma reported an error but did not include a message"
 }
 
 function getFalImageUrl(body: FalWebhookPayload): string | null {
@@ -140,6 +160,8 @@ Deno.serve(async (req) => {
       .maybeSingle()
 
     if (status === "ERROR") {
+      const errorMessage = extractFalErrorMessage(body)
+
       if (pin && pin.gen_status !== "done") {
         await supabase
           .from("location_pins")
@@ -159,10 +181,36 @@ Deno.serve(async (req) => {
           .eq("id", character.id)
       }
 
-      await supabase
+      // For animatic exports we _keep_ the existing output_url (the manifest
+      // uploaded by process-export) and downgrade status to `done` so the user
+      // can still grab the manifest. Other export types: mark error.
+      const { data: exportRow } = await supabase
         .from("exports")
-        .update({ status: "error", fal_request_id: null })
+        .select("id, type, output_url")
         .eq("fal_request_id", request_id)
+        .maybeSingle()
+
+      if (exportRow) {
+        if (exportRow.type === "animatic_video" && exportRow.output_url) {
+          await supabase
+            .from("exports")
+            .update({
+              status: "done",
+              fal_request_id: null,
+              error_message: `Luma render failed: ${errorMessage}. Manifest JSON is available below.`,
+            })
+            .eq("id", exportRow.id)
+        } else {
+          await supabase
+            .from("exports")
+            .update({
+              status: "error",
+              fal_request_id: null,
+              error_message: `Luma: ${errorMessage}`,
+            })
+            .eq("id", exportRow.id)
+        }
+      }
 
       await markSceneryError(request_id)
       return Response.json({ ok: true })
@@ -182,11 +230,17 @@ Deno.serve(async (req) => {
         extractVideoUrlFromFalData(body)
 
       if (!videoUrl) {
+        // Keep the manifest available; treat this as a "done with warning".
         await supabase
           .from("exports")
-          .update({ status: "error", fal_request_id: null })
+          .update({
+            status: "done",
+            fal_request_id: null,
+            error_message:
+              "Luma completed but no video URL was returned. Manifest JSON is available below.",
+          })
           .eq("id", exportJob.id)
-        return Response.json({ error: "no video url" }, { status: 400 })
+        return Response.json({ ok: true })
       }
 
       if (exportJob.status !== "done") {
@@ -194,9 +248,14 @@ Deno.serve(async (req) => {
         if (!persisted) {
           await supabase
             .from("exports")
-            .update({ status: "error", fal_request_id: null })
+            .update({
+              status: "done",
+              fal_request_id: null,
+              error_message:
+                "Luma rendered the video but Supabase Storage upload failed. Manifest JSON is available below.",
+            })
             .eq("id", exportJob.id)
-          return Response.json({ error: "persist failed" }, { status: 502 })
+          return Response.json({ ok: true })
         }
       }
 

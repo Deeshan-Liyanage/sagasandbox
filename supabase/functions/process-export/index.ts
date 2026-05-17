@@ -4,7 +4,9 @@ import { getAdminClient } from "../_shared/admin-client.ts"
 
 const FAL_KEY = Deno.env.get("FAL_KEY") ?? ""
 
-const LUMA_QUEUE_BASE = "https://queue.fal.run/fal-ai/luma-dream-machine"
+const LUMA_TEXT_TO_VIDEO_BASE = "https://queue.fal.run/fal-ai/luma-dream-machine"
+const LUMA_IMAGE_TO_VIDEO_BASE =
+  "https://queue.fal.run/fal-ai/luma-dream-machine/image-to-video"
 
 type TimelineEventRow = {
   id: string
@@ -15,12 +17,15 @@ type TimelineEventRow = {
   audio_url?: string | null
 }
 
+type AdminClient = ReturnType<typeof getAdminClient>
+
 function resolvePublicWebhookTarget(): string | null {
   const raw =
     Deno.env.get("NEXT_PUBLIC_SITE_URL")?.trim() ??
     Deno.env.get("PUBLIC_SITE_URL")?.trim() ??
     ""
   if (!raw) return null
+  if (!/^https:\/\//i.test(raw)) return null
   const base = raw.replace(/\/$/, "")
   return `${base}/api/webhooks/fal`
 }
@@ -46,49 +51,104 @@ function buildAnimaticPrompt(events: TimelineEventRow[]): string {
 }
 
 async function uploadAnimaticManifestJson(
-  supabase: ReturnType<typeof getAdminClient>,
+  supabase: AdminClient,
   exportId: string,
   manifest: Record<string, unknown>,
-): Promise<void> {
+): Promise<{ path: string; uploadError: string | null }> {
   const blob = new Blob([JSON.stringify(manifest, null, 2)], {
     type: "application/json",
   })
   const path = `exports/${exportId}/animatic.json`
-  await supabase.storage.from("exports").upload(path, blob, { upsert: true })
+  const { error } = await supabase.storage
+    .from("exports")
+    .upload(path, blob, { upsert: true, contentType: "application/json" })
+  return { path, uploadError: error?.message ?? null }
 }
 
-async function pollLumaVideoUrl(requestId: string): Promise<string | null> {
+async function trySignedUrl(
+  supabase: AdminClient,
+  path: string,
+): Promise<string> {
+  try {
+    const { data: signed } = await supabase.storage
+      .from("exports")
+      .createSignedUrl(path, 60 * 60 * 24)
+    return signed?.signedUrl ?? path
+  } catch {
+    return path
+  }
+}
+
+async function setExportError(
+  supabase: AdminClient,
+  exportId: string,
+  message: string,
+  partialOutputUrl?: string | null,
+): Promise<void> {
+  const update: Record<string, unknown> = {
+    status: "error",
+    error_message: message.slice(0, 1000),
+    fal_request_id: null,
+  }
+  if (partialOutputUrl !== undefined) {
+    update.output_url = partialOutputUrl
+  }
+  await supabase.from("exports").update(update).eq("id", exportId)
+}
+
+async function pollLumaVideoUrl(
+  base: string,
+  requestId: string,
+): Promise<{ url: string | null; error: string | null }> {
   const headers = { Authorization: `Key ${FAL_KEY}` }
-  const statusUrl = `${LUMA_QUEUE_BASE}/requests/${requestId}/status`
-  const resultUrl = `${LUMA_QUEUE_BASE}/requests/${requestId}`
+  const statusUrl = `${base}/requests/${requestId}/status`
+  const resultUrl = `${base}/requests/${requestId}`
   const maxAttempts = 50
 
   for (let i = 0; i < maxAttempts; i++) {
-    const stRes = await fetch(statusUrl, { headers })
-    if (!stRes.ok) return null
+    let stRes: Response
+    try {
+      stRes = await fetch(statusUrl, { headers })
+    } catch (err) {
+      return { url: null, error: `Status poll failed: ${String(err)}` }
+    }
+    if (!stRes.ok) {
+      return { url: null, error: `Status poll HTTP ${stRes.status}` }
+    }
 
-    const stJson = (await stRes.json()) as { status?: string }
+    const stJson = (await stRes.json().catch(() => ({}))) as { status?: string }
     const st = stJson.status
 
-    if (st === "FAILED" || st === "ERROR") return null
+    if (st === "FAILED" || st === "ERROR") {
+      return { url: null, error: `Luma reported ${st}` }
+    }
 
     if (st === "COMPLETED") {
       const resRes = await fetch(resultUrl, { headers })
-      if (!resRes.ok) return null
-      const body = await resRes.json()
-      return extractVideoUrlFromFalData(body)
+      if (!resRes.ok) {
+        return { url: null, error: `Result fetch HTTP ${resRes.status}` }
+      }
+      const body = await resRes.json().catch(() => null)
+      const url = extractVideoUrlFromFalData(body)
+      if (!url) {
+        return { url: null, error: "Luma completed but no video URL in payload" }
+      }
+      return { url, error: null }
     }
 
     await new Promise((r) => setTimeout(r, 2500))
   }
 
-  return null
+  return { url: null, error: "Luma polling timed out after ~2 minutes" }
 }
 
 /**
  * Queues (or completes inline) an animatic clip. Returns `true` when the HTTP
  * worker should **not** mark the export row `done` yet — finalization happens
- * via Fal webhook delivery.
+ * via Fal webhook delivery or the inline poll path below.
+ *
+ * Always uploads a JSON manifest as a guaranteed-deliverable artifact, so the
+ * user can still download _something_ even when Luma rejects the prompt.
  */
 async function processAnimaticVideo(
   exportId: string,
@@ -108,92 +168,144 @@ async function processAnimaticVideo(
   const imageUrl =
     events.map((e) => e.generated_image_url).find((u): u is string => Boolean(u)) ?? undefined
 
-  let requestId: string | null = null
-
-  if (FAL_KEY) {
-    const webhookTarget = resolvePublicWebhookTarget()
-    const queueUrl = webhookTarget
-      ? `${LUMA_QUEUE_BASE}?${new URLSearchParams({ fal_webhook: webhookTarget })}`
-      : LUMA_QUEUE_BASE
-
-    try {
-      const body: Record<string, unknown> = { prompt }
-      if (imageUrl) body.image_url = imageUrl
-
-      const res = await fetch(queueUrl, {
-        method: "POST",
-        headers: {
-          Authorization: `Key ${FAL_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
-      })
-
-      if (res.ok) {
-        const json = (await res.json()) as { request_id?: string }
-        requestId = json.request_id ?? null
-      } else {
-        const text = await res.text().catch(() => "")
-        console.warn("[processAnimaticVideo] queue submit failed:", res.status, text.slice(0, 500))
-      }
-    } catch (err) {
-      console.warn("[processAnimaticVideo] queue submit threw:", err)
-    }
-  }
-
   const manifest: Record<string, unknown> = {
     type: "animatic_video",
     project_id: projectId,
     prompt,
-    fal_request_id: requestId,
+    fal_request_id: null,
     panels,
   }
 
-  await uploadAnimaticManifestJson(supabase, exportId, manifest)
+  const { path: manifestPath, uploadError: manifestUploadError } =
+    await uploadAnimaticManifestJson(supabase, exportId, manifest)
 
-  if (requestId) {
-    await supabase.from("exports").update({ fal_request_id: requestId }).eq("id", exportId)
-
-    if (resolvePublicWebhookTarget()) {
-      return true
-    }
-
-    const videoUrl = await pollLumaVideoUrl(requestId)
-
-    if (videoUrl) {
-      const persisted = await persistExportAnimaticVideo(supabase, exportId, videoUrl)
-      if (!persisted) {
-        await supabase
-          .from("exports")
-          .update({ status: "error", fal_request_id: null })
-          .eq("id", exportId)
-      }
-      return false
-    }
-
-    await supabase.from("exports").update({ status: "error", fal_request_id: null }).eq("id", exportId)
+  if (manifestUploadError) {
+    await setExportError(
+      supabase,
+      exportId,
+      `Could not upload export manifest: ${manifestUploadError}`,
+      null,
+    )
     return false
   }
 
-  const path = `exports/${exportId}/animatic.json`
-  const { data: signed } = await supabase.storage
-    .from("exports")
-    .createSignedUrl(path, 60 * 60 * 24)
+  const manifestUrl = await trySignedUrl(supabase, manifestPath)
+
+  if (!FAL_KEY) {
+    await supabase
+      .from("exports")
+      .update({
+        status: "done",
+        output_url: manifestUrl,
+        fal_request_id: null,
+        error_message:
+          "FAL_KEY not configured on edge function — no video was rendered. Manifest is available below.",
+      })
+      .eq("id", exportId)
+    return false
+  }
+
+  const queueBase = imageUrl ? LUMA_IMAGE_TO_VIDEO_BASE : LUMA_TEXT_TO_VIDEO_BASE
+  const webhookTarget = resolvePublicWebhookTarget()
+  const queueUrl = webhookTarget
+    ? `${queueBase}?${new URLSearchParams({ fal_webhook: webhookTarget })}`
+    : queueBase
+
+  const body: Record<string, unknown> = { prompt }
+  if (imageUrl) body.image_url = imageUrl
+
+  let requestId: string | null = null
+  let submitError: string | null = null
+
+  try {
+    const res = await fetch(queueUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Key ${FAL_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    })
+
+    if (res.ok) {
+      const json = (await res.json().catch(() => ({}))) as { request_id?: string }
+      requestId = json.request_id ?? null
+      if (!requestId) {
+        submitError = "Fal accepted the request but returned no request_id"
+      }
+    } else {
+      const text = await res.text().catch(() => "")
+      submitError = `Fal queue HTTP ${res.status}: ${text.slice(0, 280) || "(no body)"}`
+      console.warn("[processAnimaticVideo] queue submit failed:", submitError)
+    }
+  } catch (err) {
+    submitError = `Fal queue request threw: ${String(err)}`
+    console.warn("[processAnimaticVideo]", submitError)
+  }
+
+  if (!requestId) {
+    await supabase
+      .from("exports")
+      .update({
+        status: "done",
+        output_url: manifestUrl,
+        fal_request_id: null,
+        error_message:
+          submitError ??
+          "Video render skipped. Manifest JSON is available for download.",
+      })
+      .eq("id", exportId)
+    return false
+  }
 
   await supabase
     .from("exports")
     .update({
-      output_url: signed?.signedUrl ?? path,
-      fal_request_id: null,
-      status: "done",
+      fal_request_id: requestId,
+      output_url: manifestUrl,
+      error_message: null,
     })
     .eq("id", exportId)
 
+  if (webhookTarget) {
+    return true
+  }
+
+  // No public webhook configured — poll inline (best-effort within edge fn time budget).
+  const { url: videoUrl, error: pollError } = await pollLumaVideoUrl(queueBase, requestId)
+
+  if (!videoUrl) {
+    await supabase
+      .from("exports")
+      .update({
+        status: "done",
+        output_url: manifestUrl,
+        fal_request_id: null,
+        error_message:
+          pollError ?? "Luma video did not complete — manifest only is available.",
+      })
+      .eq("id", exportId)
+    return false
+  }
+
+  const persisted = await persistExportAnimaticVideo(supabase, exportId, videoUrl)
+  if (!persisted) {
+    await supabase
+      .from("exports")
+      .update({
+        status: "done",
+        output_url: manifestUrl,
+        fal_request_id: null,
+        error_message:
+          "Luma rendered the video but Supabase Storage upload failed — manifest only is available.",
+      })
+      .eq("id", exportId)
+  }
   return false
 }
 
 Deno.serve(async (req) => {
-  let supabase
+  let supabase: AdminClient
   try {
     supabase = getAdminClient()
   } catch (err) {
@@ -204,20 +316,40 @@ Deno.serve(async (req) => {
     )
   }
 
-  const { export_id } = await req.json()
+  let export_id: string | undefined
+  try {
+    const payload = (await req.json()) as { export_id?: string }
+    export_id = payload.export_id
+  } catch {
+    return Response.json({ error: "invalid JSON body" }, { status: 400 })
+  }
+  if (!export_id) {
+    return Response.json({ error: "export_id required" }, { status: 400 })
+  }
 
-  await supabase.from("exports").update({ status: "processing" }).eq("id", export_id)
+  await supabase
+    .from("exports")
+    .update({ status: "processing", error_message: null })
+    .eq("id", export_id)
 
   try {
-    const { data: exportRow } = await supabase.from("exports").select("*").eq("id", export_id).single()
+    const { data: exportRow } = await supabase
+      .from("exports")
+      .select("*")
+      .eq("id", export_id)
+      .single()
 
-    if (!exportRow) throw new Error("Export not found")
+    if (!exportRow) throw new Error("Export row not found after insert")
 
-    const { data: events } = await supabase
+    const { data: events, error: eventsError } = await supabase
       .from("timeline_events")
       .select("id, title, description, generated_image_url, in_world_time, audio_url")
-      .in("id", exportRow.event_ids)
+      .in("id", exportRow.event_ids ?? [])
       .order("sequence_order")
+
+    if (eventsError) {
+      throw new Error(`Loading events failed: ${eventsError.message}`)
+    }
 
     let deferTerminalStatus = false
 
@@ -226,7 +358,13 @@ Deno.serve(async (req) => {
     } else if (exportRow.type === "audio_script") {
       await processAudioScript(export_id, exportRow.project_id, events ?? [])
     } else if (exportRow.type === "animatic_video") {
-      deferTerminalStatus = await processAnimaticVideo(export_id, exportRow.project_id, events ?? [])
+      deferTerminalStatus = await processAnimaticVideo(
+        export_id,
+        exportRow.project_id,
+        events ?? [],
+      )
+    } else {
+      throw new Error(`Unknown export type: ${exportRow.type}`)
     }
 
     if (!deferTerminalStatus) {
@@ -241,8 +379,12 @@ Deno.serve(async (req) => {
       }
     }
   } catch (err) {
-    console.error(err)
-    await supabase.from("exports").update({ status: "error" }).eq("id", export_id)
+    console.error("[process-export]", err)
+    await setExportError(
+      supabase,
+      export_id,
+      err instanceof Error ? err.message : String(err),
+    )
   }
 
   return Response.json({ ok: true })
@@ -270,15 +412,19 @@ async function processStoryboardPdf(
   })
   const path = `exports/${exportId}/storyboard.json`
 
-  await supabase.storage.from("exports").upload(path, blob, { upsert: true })
-
-  const { data: signed } = await supabase.storage
+  const { error: uploadError } = await supabase.storage
     .from("exports")
-    .createSignedUrl(path, 60 * 60 * 24)
+    .upload(path, blob, { upsert: true, contentType: "application/json" })
+
+  if (uploadError) {
+    throw new Error(`Storyboard manifest upload failed: ${uploadError.message}`)
+  }
+
+  const signedUrl = await trySignedUrl(supabase, path)
 
   await supabase
     .from("exports")
-    .update({ output_url: signed?.signedUrl ?? path })
+    .update({ output_url: signedUrl })
     .eq("id", exportId)
 }
 
@@ -351,52 +497,57 @@ async function processAudioScript(exportId: string, projectId: string, events: T
   }
 
   const audioUrls: string[] = []
+  const failures: string[] = []
 
   for (let i = 0; i < events.length; i++) {
     const event = events[i]
     const text = event.description ?? event.title
 
-    // Resolve Kokoro voice: first character mentioned in text wins, else rotate.
     const matchedVoice = [...voiceMap.entries()]
       .find(([name]) => text.toLowerCase().includes(name))?.[1]
     const voiceOverride =
       matchedVoice && isKokoroVoice(matchedVoice) ? matchedVoice : undefined
 
-    // 500 ms gap between calls to stay within rate limits
     if (i > 0) await new Promise((r) => setTimeout(r, 500))
 
     const audioUrl = await kokoro(text, i, voiceOverride)
 
-    if (audioUrl) {
-      // Download from fal CDN and persist in Supabase Storage so the URL
-      // does not expire (fal temp URLs last ~1 hour).
-      try {
-        const audioRes = await fetch(audioUrl)
-        if (audioRes.ok) {
-          const buffer = await audioRes.arrayBuffer()
-          const path = `audio/${exportId}/${event.id}.wav`
-          await supabase.storage.from("audio").upload(path, buffer, {
-            contentType: "audio/wav",
-            upsert: true,
-          })
-          const { data: url } = supabase.storage.from("audio").getPublicUrl(path)
-          const persistedUrl = url.publicUrl
+    if (!audioUrl) {
+      failures.push(event.title || event.id)
+      continue
+    }
 
-          await supabase.from("timeline_events").update({ audio_url: persistedUrl }).eq("id", event.id)
+    try {
+      const audioRes = await fetch(audioUrl)
+      if (audioRes.ok) {
+        const buffer = await audioRes.arrayBuffer()
+        const path = `audio/${exportId}/${event.id}.wav`
+        await supabase.storage.from("audio").upload(path, buffer, {
+          contentType: "audio/wav",
+          upsert: true,
+        })
+        const { data: url } = supabase.storage.from("audio").getPublicUrl(path)
+        const persistedUrl = url.publicUrl
 
-          audioUrls.push(persistedUrl)
-        } else {
-          // Fall back to direct fal URL
-          await supabase.from("timeline_events").update({ audio_url: audioUrl }).eq("id", event.id)
-          audioUrls.push(audioUrl)
-        }
-      } catch {
-        // Fall back to direct fal URL on any storage error
+        await supabase.from("timeline_events").update({ audio_url: persistedUrl }).eq("id", event.id)
+
+        audioUrls.push(persistedUrl)
+      } else {
         await supabase.from("timeline_events").update({ audio_url: audioUrl }).eq("id", event.id)
         audioUrls.push(audioUrl)
       }
+    } catch {
+      await supabase.from("timeline_events").update({ audio_url: audioUrl }).eq("id", event.id)
+      audioUrls.push(audioUrl)
     }
   }
 
-  await supabase.from("exports").update({ output_url: JSON.stringify(audioUrls) }).eq("id", exportId)
+  const update: Record<string, unknown> = {
+    output_url: JSON.stringify(audioUrls),
+  }
+  if (failures.length > 0) {
+    update.error_message = `Voice generation failed for ${failures.length} event(s): ${failures.slice(0, 4).join(", ")}${failures.length > 4 ? "…" : ""}`
+  }
+
+  await supabase.from("exports").update(update).eq("id", exportId)
 }

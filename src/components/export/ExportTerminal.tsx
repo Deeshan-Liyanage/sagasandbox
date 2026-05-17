@@ -107,9 +107,22 @@ export function ExportTerminal({
     liveExport && currentExportId && liveExport.id === currentExportId
       ? liveExport
       : null;
+  const currentRow = currentExportId
+    ? recentExports.find((r) => r.id === currentExportId) ?? null
+    : null;
   const displayStatus = realtimeExport?.status ?? exportStatus;
+  const realtimeErrorMessage =
+    realtimeExport?.error_message ?? currentRow?.error_message ?? null;
   const displayError =
-    realtimeExport?.status === "error" ? "Export failed" : error;
+    realtimeExport?.status === "error"
+      ? realtimeErrorMessage ?? "Export failed"
+      : error;
+  const displayWarning =
+    realtimeExport?.status === "done" && realtimeErrorMessage
+      ? realtimeErrorMessage
+      : currentRow?.status === "done"
+        ? currentRow.error_message
+        : null;
   const terminalExportDone =
     Boolean(currentExportId) &&
     (realtimeExport?.status === "done" || exportStatus === "done");
@@ -167,7 +180,8 @@ export function ExportTerminal({
       if (idx === -1) return [row, ...prev].slice(0, 40);
       if (
         prev[idx].status === row.status &&
-        prev[idx].output_url === row.output_url
+        prev[idx].output_url === row.output_url &&
+        prev[idx].error_message === row.error_message
       ) {
         return prev;
       }
@@ -414,6 +428,8 @@ export function ExportTerminal({
 
       {displayError ? (
         <p className="text-xs text-[#ef4444]">{displayError}</p>
+      ) : displayWarning ? (
+        <p className="text-xs text-[#f59e0b]">{displayWarning}</p>
       ) : null}
 
       <div className="flex flex-col gap-2">
@@ -494,6 +510,19 @@ export function ExportTerminal({
                       </span>
                     )}
                   </div>
+
+                  {row.error_message ? (
+                    <p
+                      className={cn(
+                        "mt-1 break-words text-[10px]",
+                        row.status === "error"
+                          ? "text-[#ef4444]"
+                          : "text-[#f59e0b]",
+                      )}
+                    >
+                      {row.error_message}
+                    </p>
+                  ) : null}
 
                   {row.status === "done" ? (
                     <PerFileLinks
