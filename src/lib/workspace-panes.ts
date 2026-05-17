@@ -2,22 +2,24 @@
 
 export type PaneVisibility = Record<WorkspacePaneId, boolean>;
 
+/** First visit (no `saga-workspace-panes` key): canvas-first; side panes off until toggled. */
 export const DEFAULT_PANE_VISIBILITY: PaneVisibility = {
-  vault: true,
+  vault: false,
   export: false,
-  timeline: true,
+  timeline: false,
 };
 
 export const LAYOUT_PRESETS = {
-  default: {
-    vault: true,
-    export: false,
-    timeline: true,
-  },
   "focus-canvas": {
     vault: false,
     export: false,
     timeline: false,
+  },
+  /** Former primary preset: vault + timeline visible, export hidden. */
+  balanced: {
+    vault: true,
+    export: false,
+    timeline: true,
   },
   full: {
     vault: true,
@@ -65,4 +67,98 @@ export function layoutGroupId(
   segment: "horizontal" | "vertical",
 ): string {
   return `saga-workspace-layout:${projectId}:${segment}`;
+}
+
+const RESIZABLE_PANELS_PREFIX = "react-resizable-panels:";
+
+/** Key format must match `useDefaultLayout` / `react-resizable-panels` (id + panel ids, `:`-joined). */
+export function resizablePanelsLayoutStorageKey(
+  projectId: string,
+  segment: "horizontal" | "vertical",
+): string {
+  const groupId = layoutGroupId(projectId, segment);
+  const panelIds =
+    segment === "horizontal"
+      ? (["vault", "canvas", "export"] as const)
+      : (["main", "timeline"] as const);
+  return `${RESIZABLE_PANELS_PREFIX}${[groupId, ...panelIds].join(":")}`;
+}
+
+type LayoutStorage = Pick<Storage, "getItem" | "setItem">;
+
+function parseNumericLayoutJson(raw: string): Record<string, number> | null {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof v === "number" && Number.isFinite(v)) out[k] = v;
+    }
+    return Object.keys(out).length ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+function horizontalLayoutLooksValid(layout: Record<string, number>): boolean {
+  const { vault: v, canvas: c, export: x } = layout;
+  if (v === undefined || c === undefined || x === undefined) return false;
+  const sum = v + c + x;
+  if (Math.abs(sum - 100) > 2) return false;
+  // Reject layouts that crush the canvas (common symptom of bad persisted state).
+  if (c < 18) return false;
+  return true;
+}
+
+function verticalLayoutLooksValid(layout: Record<string, number>): boolean {
+  const { main: m, timeline: t } = layout;
+  if (m === undefined || t === undefined) return false;
+  const sum = m + t;
+  if (Math.abs(sum - 100) > 2) return false;
+  if (m < 28) return false;
+  return true;
+}
+
+/**
+ * Drops corrupted or absurd persisted flex percentages so the next read falls back to
+ * panel `defaultSize` values (see `AppShell`).
+ */
+export function sanitizeWorkspaceResizableLayouts(
+  projectId: string,
+  storage: LayoutStorage = typeof window === "undefined"
+    ? { getItem: () => null, setItem: () => {} }
+    : localStorage,
+): void {
+  const hKey = resizablePanelsLayoutStorageKey(projectId, "horizontal");
+  const vKey = resizablePanelsLayoutStorageKey(projectId, "vertical");
+  const hRaw = storage.getItem(hKey);
+  if (hRaw) {
+    const h = parseNumericLayoutJson(hRaw);
+    if (!h || !horizontalLayoutLooksValid(h)) storage.removeItem(hKey);
+  }
+  const vRaw = storage.getItem(vKey);
+  if (vRaw) {
+    const v = parseNumericLayoutJson(vRaw);
+    if (!v || !verticalLayoutLooksValid(v)) storage.removeItem(vKey);
+  }
+}
+
+/** Wraps storage so the first read clears bad layout keys for this project. */
+export function createSanitizingLayoutStorage(
+  projectId: string,
+  inner: LayoutStorage,
+): LayoutStorage {
+  let didSanitize = false;
+  return {
+    getItem: (key: string) => {
+      if (!didSanitize) {
+        didSanitize = true;
+        sanitizeWorkspaceResizableLayouts(projectId, inner);
+      }
+      return inner.getItem(key);
+    },
+    setItem: (key: string, value: string) => inner.setItem(key, value),
+  };
 }
