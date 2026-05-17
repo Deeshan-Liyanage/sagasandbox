@@ -84,7 +84,15 @@ export function resizablePanelsLayoutStorageKey(
   return `${RESIZABLE_PANELS_PREFIX}${[groupId, ...panelIds].join(":")}`;
 }
 
-type LayoutStorage = Pick<Storage, "getItem" | "setItem">;
+type LayoutStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+function noopStorage(): LayoutStorage {
+  return {
+    getItem: () => null,
+    setItem: () => {},
+    removeItem: () => {},
+  };
+}
 
 function parseNumericLayoutJson(raw: string): Record<string, number> | null {
   try {
@@ -128,7 +136,7 @@ function verticalLayoutLooksValid(layout: Record<string, number>): boolean {
 export function sanitizeWorkspaceResizableLayouts(
   projectId: string,
   storage: LayoutStorage = typeof window === "undefined"
-    ? { getItem: () => null, setItem: () => {} }
+    ? noopStorage()
     : localStorage,
 ): void {
   const hKey = resizablePanelsLayoutStorageKey(projectId, "horizontal");
@@ -160,5 +168,6 @@ export function createSanitizingLayoutStorage(
       return inner.getItem(key);
     },
     setItem: (key: string, value: string) => inner.setItem(key, value),
+    removeItem: (key: string) => inner.removeItem(key),
   };
 }
