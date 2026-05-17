@@ -5,6 +5,7 @@ import type { Export } from "../../types/app";
 import {
   buildAnimaticArtifactFilename,
   inferAnimaticDownloadExtension,
+  resolveExportPrimaryArtifactUrl,
 } from "./export-download";
 
 const animExp = {
@@ -17,6 +18,38 @@ const animExp = {
   event_ids: [],
   fal_request_id: null,
 } as unknown as Export;
+
+describe("resolveExportPrimaryArtifactUrl", () => {
+  it("uses signed_url for video when output_url is empty", () => {
+    expect(
+      resolveExportPrimaryArtifactUrl(
+        "animatic_video",
+        null,
+        "https://cdn.example.com/video.mp4",
+      ),
+    ).toBe("https://cdn.example.com/video.mp4");
+  });
+
+  it("prefers signed_url over output_url when both are https", () => {
+    expect(
+      resolveExportPrimaryArtifactUrl(
+        "animatic_video",
+        "https://old.example.com/x",
+        "https://fresh.example.com/y",
+      ),
+    ).toBe("https://fresh.example.com/y");
+  });
+
+  it("still parses audio from output_url JSON", () => {
+    expect(
+      resolveExportPrimaryArtifactUrl(
+        "audio_script",
+        '["https://a.test/1.wav"]',
+        "https://ignored",
+      ),
+    ).toBe("https://a.test/1.wav");
+  });
+});
 
 describe("inferAnimaticDownloadExtension", () => {
   it("respects pathname when present", () => {

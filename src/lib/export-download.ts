@@ -21,13 +21,19 @@ export function resolveExportPrimaryArtifactUrl(
   outputUrl: string | null | undefined,
   signedUrl?: string | null,
 ): string | null {
-  if (!outputUrl) return null;
+  const out = outputUrl?.trim() ?? "";
+
   if (type === "audio_script") {
-    const urls = parseAudioExportUrls(outputUrl);
+    if (!out) return null;
+    const urls = parseAudioExportUrls(out);
     return urls[0] ?? null;
   }
+
+  // Animatic/storyboard: API may return a fresh `signed_url` while `output_url`
+  // is still null (race) or empty — prefer signed link before bailing.
   if (signedUrl && /^https?:\/\//i.test(signedUrl)) return signedUrl;
-  return outputUrl;
+  if (!out) return null;
+  return out;
 }
 
 function extractPathExtension(remoteUrl: string): string | null {

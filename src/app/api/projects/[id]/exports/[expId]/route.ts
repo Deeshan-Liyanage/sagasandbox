@@ -35,6 +35,32 @@ async function deriveFreshSignedDownloadUrl(
   return out;
 }
 
+async function tryConventionalExportSignedUrl(
+  supabase: SupabaseClient<Database>,
+  exportType: string,
+  exportId: string,
+): Promise<string | undefined> {
+  const paths: string[] = [];
+  if (exportType === "animatic_video") {
+    paths.push(
+      `exports/${exportId}/animatic.mp4`,
+      `exports/${exportId}/animatic.json`,
+    );
+  } else if (exportType === "storyboard_pdf") {
+    paths.push(`exports/${exportId}/storyboard.json`);
+  } else {
+    return undefined;
+  }
+
+  for (const objectPath of paths) {
+    const { data } = await supabase.storage
+      .from("exports")
+      .createSignedUrl(objectPath, 3600);
+    if (data?.signedUrl) return data.signedUrl;
+  }
+  return undefined;
+}
+
 export async function GET(_request: Request, context: RouteContext) {
   const auth = await requireAuth();
   if (isAuthError(auth)) return auth;
@@ -71,14 +97,24 @@ export async function GET(_request: Request, context: RouteContext) {
 
     let signed_url: string | undefined;
 
-    if (exportRow.status === "done" && exportRow.output_url) {
-      try {
-        signed_url = await deriveFreshSignedDownloadUrl(
+    if (exportRow.status === "done") {
+      if (exportRow.output_url && String(exportRow.output_url).trim()) {
+        try {
+          signed_url = await deriveFreshSignedDownloadUrl(
+            supabase,
+            exportRow.output_url as string,
+          );
+        } catch {
+          signed_url = exportRow.output_url as string;
+        }
+      }
+
+      if (!signed_url) {
+        signed_url = await tryConventionalExportSignedUrl(
           supabase,
-          exportRow.output_url as string,
+          exportRow.type as string,
+          exportRow.id,
         );
-      } catch {
-        signed_url = exportRow.output_url as string;
       }
     }
 

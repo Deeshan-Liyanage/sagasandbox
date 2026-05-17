@@ -2,7 +2,11 @@
 
 export type PaneVisibility = Record<WorkspacePaneId, boolean>;
 
-/** First visit (no `saga-workspace-panes` key): canvas-first; side panes off until toggled. */
+/**
+ * First visit (no storage key): same as "Focus canvas" — side panes collapsed.
+ * Storage key `v2` intentionally ignores legacy `saga-workspace-panes:${id}` so
+ * upgrades default everyone back to focus-canvas once.
+ */
 export const DEFAULT_PANE_VISIBILITY: PaneVisibility = {
   vault: false,
   export: false,
@@ -31,7 +35,7 @@ export const LAYOUT_PRESETS = {
 export type LayoutPresetId = keyof typeof LAYOUT_PRESETS;
 
 const visibilityStorageKey = (projectId: string) =>
-  `saga-workspace-panes:${projectId}`;
+  `saga-workspace-panes:v2:${projectId}`;
 
 export function loadPaneVisibility(projectId: string): PaneVisibility {
   if (typeof window === "undefined") {
