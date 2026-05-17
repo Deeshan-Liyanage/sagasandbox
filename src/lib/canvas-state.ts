@@ -98,7 +98,9 @@ function pickMeta(source: Record<string, unknown>): CanvasMeta {
     if (key in source) {
       const value = source[key];
       if (key === "scenery_transform") {
-        meta.scenery_transform = isSceneryTransform(value) ? value : null;
+        meta.scenery_transform = isSceneryTransform(value)
+          ? normalizeSceneryTransform(value)
+          : null;
       } else if (key === "synthesis_user_notes") {
         meta.synthesis_user_notes =
           typeof value === "string" ? value : value === null ? null : undefined;
