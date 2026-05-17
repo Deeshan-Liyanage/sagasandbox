@@ -191,6 +191,7 @@ export const GeographyCanvas = forwardRef<
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const mapPaneRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
   const sceneryImageRef = useRef<Konva.Image>(null);
   const sceneryTransformerRef = useRef<Konva.Transformer>(null);
@@ -782,7 +783,7 @@ export const GeographyCanvas = forwardRef<
   }, []);
 
   useEffect(() => {
-    const el = containerRef.current;
+    const el = mapPaneRef.current;
     if (!el) return;
     const ro = new ResizeObserver(([entry]) => {
       setSize({
@@ -1631,9 +1632,235 @@ export const GeographyCanvas = forwardRef<
     <div
       ref={containerRef}
       tabIndex={0}
-      className="relative h-full w-full overflow-hidden bg-[#0e0e0f] outline-none"
+      className="flex h-full w-full overflow-hidden bg-[#0e0e0f] outline-none"
       onPointerDown={() => containerRef.current?.focus({ preventScroll: true })}
     >
+      <div
+        ref={mapPaneRef}
+        className="relative min-h-0 min-w-0 flex-1 overflow-hidden outline-none"
+      >
+        <SceneryPromptPreviewModal
+          key={promptPreviewDefault ?? (promptPreviewLoading ? "loading" : "empty")}
+          open={promptPreviewOpen}
+          loading={promptPreviewLoading}
+          defaultPrompt={promptPreviewDefault}
+          warnings={promptPreviewWarnings}
+          layoutPlan={promptPreviewLayoutPlan}
+          wireframeThumbnail={promptPreviewWireframe}
+          confirming={synthesizing}
+          onClose={handleCloseSynthesisPreview}
+          onConfirm={handleConfirmSynthesisFromPreview}
+        />
+        {loading ? (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#0e0e0f]/80">
+            <div className="h-48 w-full max-w-md animate-pulse rounded-lg bg-[#1a1a1e]" />
+          </div>
+        ) : null}
+        {depthPreviewUrl && !hasSceneryImage ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={depthPreviewUrl}
+            alt="Depth map preview"
+            className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover opacity-30 mix-blend-screen"
+          />
+        ) : null}
+        {sceneryPreviewUrl === SCENERY_PENDING ? (
+          <div className="pointer-events-none absolute inset-x-4 top-4 z-[2] rounded-md border border-[#7c3aed]/40 bg-[#7c3aed]/15 px-3 py-2 text-center text-xs text-[#e5e7eb]">
+            <span className="inline-block animate-pulse">
+              {pipelineStageLabel(sceneryPipelineStage)}
+            </span>
+          </div>
+        ) : null}
+        {tool === "map" ? (
+          <p className="pointer-events-none absolute inset-x-4 bottom-20 z-[2] text-center text-[10px] text-[#6b7280]">
+            Drag to draw · Click empty map to add pin · Hold Space, Alt, or Shift
+            and drag to pan · Middle / right mouse drag to pan
+            {hasSceneryImage ? (
+              <span className="block text-[#5b6577]">
+                Sketch stroke overlay is dimmed while scenery is visible; pins stay
+                aligned to the map when Tier&nbsp;B geospatial data is present.
+              </span>
+            ) : null}
+          </p>
+        ) : null}
+        {toolbar}
+        {pins.length === 0 && !pinCreator && tool === "map" ? (
+          <p className="pointer-events-none absolute inset-0 z-[1] flex items-center justify-center text-sm text-[#9ca3af]">
+            Click the map to add a location
+          </p>
+        ) : null}
+
+        <Stage
+          ref={stageRef}
+          width={size.width}
+          height={size.height}
+          draggable={false}
+          onWheel={handleWheel}
+          onMouseDown={handlePointerDown}
+          onTouchStart={handlePointerDown}
+          onMousemove={handlePointerMove}
+          onTouchMove={handlePointerMove}
+          onMouseup={handlePointerUp}
+          onTouchEnd={handlePointerUp}
+          onDblClick={handleStageDblClick}
+          onContextMenu={(e) => e.evt.preventDefault()}
+          className={toolCursor(tool, panModifierHeld, isPanning)}
+        >
+          <Layer>
+            {hasSceneryImage && sceneryTransform ? (
+              <>
+                <KonvaImage
+                  ref={sceneryImageRef}
+                  image={sceneryImage!}
+                  x={sceneryTransform.x}
+                  y={sceneryTransform.y}
+                  width={sceneryTransform.width}
+                  height={sceneryTransform.height}
+                  scaleX={1}
+                  scaleY={1}
+                  opacity={SCENERY_OPACITY}
+                  draggable={tool === "scenery"}
+                  listening={tool === "scenery"}
+                  onDragStart={handleSceneryDragStart}
+                  onDragMove={handleSceneryDragMove}
+                  onDragEnd={handleSceneryDragEnd}
+                  onTransform={handleSceneryTransform}
+                  onTransformEnd={handleSceneryTransformEnd}
+                />
+                {tool === "scenery" ? (
+                  <Rect
+                    x={sceneryTransform.x}
+                    y={sceneryTransform.y}
+                    width={sceneryTransform.width}
+                    height={sceneryTransform.height}
+                    stroke="#7c3aed"
+                    strokeWidth={2 / scale}
+                    dash={[8 / scale, 4 / scale]}
+                    listening={false}
+                  />
+                ) : null}
+                {tool === "scenery" ? (
+                  <Transformer
+                    ref={sceneryTransformerRef}
+                    rotateEnabled={false}
+                    keepRatio={false}
+                    borderStroke="#7c3aed"
+                    anchorStroke="#a78bfa"
+                    anchorFill="#1a1a1e"
+                    boundBoxFunc={(oldBox, newBox) => {
+                      if (
+                        newBox.width < MIN_SCENERY_SIZE ||
+                        newBox.height < MIN_SCENERY_SIZE
+                      ) {
+                        return oldBox;
+                      }
+                      return newBox;
+                    }}
+                  />
+                ) : null}
+              </>
+            ) : null}
+          </Layer>
+          <Layer ref={mapContentLayerRef}>
+            {lines.map((line) => (
+              <Line
+                key={line.id}
+                id={line.id}
+                points={line.points}
+                stroke="#7c3aed"
+                strokeWidth={3 / scale}
+                tension={0.4}
+                lineCap="round"
+                lineJoin="round"
+                opacity={hasSceneryImage ? 0.38 : 1}
+                listening={tool !== "scenery"}
+              />
+            ))}
+            <Group ref={peerCursorsGroupRef} listening={false}>
+              {Object.entries(peerCursors).map(([peerId, cursor]) => (
+                <Group key={`cursor-${peerId}`} x={cursor.x} y={cursor.y}>
+                  <Circle
+                    radius={6}
+                    fill="#10b981"
+                    stroke="#0e0e0f"
+                    strokeWidth={2}
+                  />
+                  <Text
+                    text="Collaborator"
+                    fontSize={10}
+                    fill="#10b981"
+                    y={10}
+                    offsetX={28}
+                  />
+                </Group>
+              ))}
+            </Group>
+            {pins.map((pin) => (
+              <Group
+                key={pin.id}
+                x={pin.canvas_x}
+                y={pin.canvas_y}
+                draggable={
+                  tool === "map" && apiAvailable && !panModifierHeld
+                }
+                onDragStart={(e) => {
+                  e.cancelBubble = true;
+                  pointerSessionRef.current = null;
+                }}
+                onDragEnd={(e) => {
+                  e.cancelBubble = true;
+                  const node = e.target;
+                  void persistPinPosition(pin, node.x(), node.y());
+                }}
+                onClick={(e) => {
+                  e.cancelBubble = true;
+                  onPinSelect(pin);
+                }}
+                onTap={(e) => {
+                  e.cancelBubble = true;
+                  onPinSelect(pin);
+                }}
+              >
+                <Circle
+                  radius={10}
+                  fill={pinColor(pin.gen_status)}
+                  stroke={
+                    highlightedPinId === pin.id ||
+                    sidebarSelectedPinId === pin.id
+                      ? "#7c3aed"
+                      : "#0e0e0f"
+                  }
+                  strokeWidth={
+                    highlightedPinId === pin.id ||
+                    sidebarSelectedPinId === pin.id
+                      ? 3
+                      : 2
+                  }
+                  shadowBlur={pin.gen_status === "generating" ? 8 : 0}
+                />
+                <Text
+                  text={pin.label}
+                  fontSize={12}
+                  fill="#e5e7eb"
+                  y={14}
+                  offsetX={pin.label.length * 3}
+                />
+              </Group>
+            ))}
+          </Layer>
+        </Stage>
+
+        {pinCreator ? (
+          <PinCreator
+            projectId={projectId}
+            canvasX={pinCreator.x}
+            canvasY={pinCreator.y}
+            apiAvailable={apiAvailable}
+            onCreated={handlePinCreated}
+            onCancel={() => setPinCreator(null)}
+          />
+        ) : null}
+      </div>
       <MapPinsList
         pins={pins}
         highlightedPinId={highlightedPinId ?? undefined}
@@ -1641,227 +1868,6 @@ export const GeographyCanvas = forwardRef<
         onPinSelect={onPinSelect}
         onFocusPin={focusPinOnViewport}
       />
-      <SceneryPromptPreviewModal
-        key={promptPreviewDefault ?? (promptPreviewLoading ? "loading" : "empty")}
-        open={promptPreviewOpen}
-        loading={promptPreviewLoading}
-        defaultPrompt={promptPreviewDefault}
-        warnings={promptPreviewWarnings}
-        layoutPlan={promptPreviewLayoutPlan}
-        wireframeThumbnail={promptPreviewWireframe}
-        confirming={synthesizing}
-        onClose={handleCloseSynthesisPreview}
-        onConfirm={handleConfirmSynthesisFromPreview}
-      />
-      {loading ? (
-        <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#0e0e0f]/80">
-          <div className="h-48 w-full max-w-md animate-pulse rounded-lg bg-[#1a1a1e]" />
-        </div>
-      ) : null}
-      {depthPreviewUrl && !hasSceneryImage ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={depthPreviewUrl}
-          alt="Depth map preview"
-          className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover opacity-30 mix-blend-screen"
-        />
-      ) : null}
-      {sceneryPreviewUrl === SCENERY_PENDING ? (
-        <div className="pointer-events-none absolute inset-x-4 top-4 z-[2] rounded-md border border-[#7c3aed]/40 bg-[#7c3aed]/15 px-3 py-2 text-center text-xs text-[#e5e7eb]">
-          <span className="inline-block animate-pulse">
-            {pipelineStageLabel(sceneryPipelineStage)}
-          </span>
-        </div>
-      ) : null}
-      {tool === "map" ? (
-        <p className="pointer-events-none absolute inset-x-4 bottom-20 z-[2] text-center text-[10px] text-[#6b7280]">
-          Drag to draw · Click empty map to add pin · Hold Space, Alt, or Shift
-          and drag to pan · Middle / right mouse drag to pan
-          {hasSceneryImage ? (
-            <span className="block text-[#5b6577]">
-              Sketch stroke overlay is dimmed while scenery is visible; pins stay
-              aligned to the map when Tier&nbsp;B geospatial data is present.
-            </span>
-          ) : null}
-        </p>
-      ) : null}
-      {toolbar}
-      {pins.length === 0 && !pinCreator && tool === "map" ? (
-        <p className="pointer-events-none absolute inset-0 z-[1] flex items-center justify-center text-sm text-[#9ca3af]">
-          Click the map to add a location
-        </p>
-      ) : null}
-
-      <Stage
-        ref={stageRef}
-        width={size.width}
-        height={size.height}
-        draggable={false}
-        onWheel={handleWheel}
-        onMouseDown={handlePointerDown}
-        onTouchStart={handlePointerDown}
-        onMousemove={handlePointerMove}
-        onTouchMove={handlePointerMove}
-        onMouseup={handlePointerUp}
-        onTouchEnd={handlePointerUp}
-        onDblClick={handleStageDblClick}
-        onContextMenu={(e) => e.evt.preventDefault()}
-        className={toolCursor(tool, panModifierHeld, isPanning)}
-      >
-        <Layer>
-          {hasSceneryImage && sceneryTransform ? (
-            <>
-              <KonvaImage
-                ref={sceneryImageRef}
-                image={sceneryImage!}
-                x={sceneryTransform.x}
-                y={sceneryTransform.y}
-                width={sceneryTransform.width}
-                height={sceneryTransform.height}
-                scaleX={1}
-                scaleY={1}
-                opacity={SCENERY_OPACITY}
-                draggable={tool === "scenery"}
-                listening={tool === "scenery"}
-                onDragStart={handleSceneryDragStart}
-                onDragMove={handleSceneryDragMove}
-                onDragEnd={handleSceneryDragEnd}
-                onTransform={handleSceneryTransform}
-                onTransformEnd={handleSceneryTransformEnd}
-              />
-              {tool === "scenery" ? (
-                <Rect
-                  x={sceneryTransform.x}
-                  y={sceneryTransform.y}
-                  width={sceneryTransform.width}
-                  height={sceneryTransform.height}
-                  stroke="#7c3aed"
-                  strokeWidth={2 / scale}
-                  dash={[8 / scale, 4 / scale]}
-                  listening={false}
-                />
-              ) : null}
-              {tool === "scenery" ? (
-                <Transformer
-                  ref={sceneryTransformerRef}
-                  rotateEnabled={false}
-                  keepRatio={false}
-                  borderStroke="#7c3aed"
-                  anchorStroke="#a78bfa"
-                  anchorFill="#1a1a1e"
-                  boundBoxFunc={(oldBox, newBox) => {
-                    if (
-                      newBox.width < MIN_SCENERY_SIZE ||
-                      newBox.height < MIN_SCENERY_SIZE
-                    ) {
-                      return oldBox;
-                    }
-                    return newBox;
-                  }}
-                />
-              ) : null}
-            </>
-          ) : null}
-        </Layer>
-        <Layer ref={mapContentLayerRef}>
-          {lines.map((line) => (
-            <Line
-              key={line.id}
-              id={line.id}
-              points={line.points}
-              stroke="#7c3aed"
-              strokeWidth={3 / scale}
-              tension={0.4}
-              lineCap="round"
-              lineJoin="round"
-              opacity={hasSceneryImage ? 0.38 : 1}
-              listening={tool !== "scenery"}
-            />
-          ))}
-          <Group ref={peerCursorsGroupRef} listening={false}>
-            {Object.entries(peerCursors).map(([peerId, cursor]) => (
-              <Group key={`cursor-${peerId}`} x={cursor.x} y={cursor.y}>
-                <Circle
-                  radius={6}
-                  fill="#10b981"
-                  stroke="#0e0e0f"
-                  strokeWidth={2}
-                />
-                <Text
-                  text="Collaborator"
-                  fontSize={10}
-                  fill="#10b981"
-                  y={10}
-                  offsetX={28}
-                />
-              </Group>
-            ))}
-          </Group>
-          {pins.map((pin) => (
-            <Group
-              key={pin.id}
-              x={pin.canvas_x}
-              y={pin.canvas_y}
-              draggable={
-                tool === "map" && apiAvailable && !panModifierHeld
-              }
-              onDragStart={(e) => {
-                e.cancelBubble = true;
-                pointerSessionRef.current = null;
-              }}
-              onDragEnd={(e) => {
-                e.cancelBubble = true;
-                const node = e.target;
-                void persistPinPosition(pin, node.x(), node.y());
-              }}
-              onClick={(e) => {
-                e.cancelBubble = true;
-                onPinSelect(pin);
-              }}
-              onTap={(e) => {
-                e.cancelBubble = true;
-                onPinSelect(pin);
-              }}
-            >
-              <Circle
-                radius={10}
-                fill={pinColor(pin.gen_status)}
-                stroke={
-                  highlightedPinId === pin.id ||
-                  sidebarSelectedPinId === pin.id
-                    ? "#7c3aed"
-                    : "#0e0e0f"
-                }
-                strokeWidth={
-                  highlightedPinId === pin.id ||
-                  sidebarSelectedPinId === pin.id
-                    ? 3
-                    : 2
-                }
-                shadowBlur={pin.gen_status === "generating" ? 8 : 0}
-              />
-              <Text
-                text={pin.label}
-                fontSize={12}
-                fill="#e5e7eb"
-                y={14}
-                offsetX={pin.label.length * 3}
-              />
-            </Group>
-          ))}
-        </Layer>
-      </Stage>
-
-      {pinCreator ? (
-        <PinCreator
-          projectId={projectId}
-          canvasX={pinCreator.x}
-          canvasY={pinCreator.y}
-          apiAvailable={apiAvailable}
-          onCreated={handlePinCreated}
-          onCancel={() => setPinCreator(null)}
-        />
-      ) : null}
     </div>
   );
 });

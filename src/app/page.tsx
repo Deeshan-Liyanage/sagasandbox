@@ -2,11 +2,11 @@ import { redirect } from "next/navigation";
 
 import { DEMO_PROJECT_ID } from "@/lib/mock-workspace";
 import { isSupabaseConfigured } from "@/lib/supabase-env";
-import { createAdminClient } from "@/lib/supabase-admin";
+import { createAdminClient, getSupabaseAdminKey } from "@/lib/supabase-admin";
 import Link from "next/link";
 
 export default async function HomePage() {
-  if (!isSupabaseConfigured()) {
+  if (!isSupabaseConfigured() || !getSupabaseAdminKey()) {
     return <DemoLanding />;
   }
 
