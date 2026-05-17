@@ -7,6 +7,29 @@ import {
 
 type RouteContext = { params: Promise<{ id: string }> };
 
+/** List recent exports for the timeline export terminal — download links hydrate per-row via `[expId]`. */
+export async function GET(_request: Request, context: RouteContext) {
+  const auth = await requireAuth();
+  if (isAuthError(auth)) return auth;
+  const { supabase } = auth;
+  const { id: projectId } = await context.params;
+
+  try {
+    const { data, error } = await supabase
+      .from("exports")
+      .select("*")
+      .eq("project_id", projectId)
+      .order("created_at", { ascending: false })
+      .limit(40);
+
+    if (error) return jsonError(error.message);
+
+    return NextResponse.json({ exports: data ?? [] });
+  } catch (err) {
+    return jsonError(err instanceof Error ? err.message : "Unknown error");
+  }
+}
+
 export async function POST(request: Request, context: RouteContext) {
   const auth = await requireAuth();
   if (isAuthError(auth)) return auth;

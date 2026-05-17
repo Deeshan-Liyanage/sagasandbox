@@ -1,9 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Download } from "lucide-react";
 import type { Export, ExportType, TimelineEvent } from "@/types/app";
 import { RemoteImage } from "@/components/shared/RemoteImage";
+import {
+  downloadAudioExportArtifacts,
+  parseAudioExportUrls,
+  resolveExportPrimaryArtifactUrl,
+  buildExportArtifactFilename,
+  triggerBrowserDownload,
+} from "@/lib/export-download";
 import { cn } from "@/lib/cn";
 import {
   PROJECT_API_UNAVAILABLE_MESSAGE,
@@ -26,26 +33,11 @@ const EXPORT_TYPES: { id: ExportType; label: string }[] = [
   { id: "animatic_video", label: "Animatic video (Luma → MP4)" },
 ];
 
-/** `audio_script` exports store a JSON array of URLs in `output_url`. */
-function resolveExportDownloadUrl(
-  type: ExportType,
-  outputUrl: string | null | undefined,
-  signedUrl?: string | null,
-): string | null {
-  if (signedUrl) return signedUrl;
-  if (!outputUrl) return null;
-  if (type === "audio_script") {
-    try {
-      const parsed = JSON.parse(outputUrl) as unknown;
-      if (Array.isArray(parsed) && typeof parsed[0] === "string") {
-        return parsed[0];
-      }
-    } catch {
-      // fall through — output_url may already be a single URL
-    }
-  }
-  return outputUrl;
-}
+const TYPE_LABELS: Record<ExportType, string> = {
+  storyboard_pdf: "Storyboard",
+  audio_script: "Narration",
+  animatic_video: "Animatic",
+};
 
 function progressWidth(status: Export["status"] | null) {
   switch (status) {
@@ -57,6 +49,28 @@ function progressWidth(status: Export["status"] | null) {
       return "100%";
     default:
       return "0%";
+  }
+}
+
+function exportTypeBadge(type: string): ExportType | null {
+  if (type === "storyboard_pdf" || type === "audio_script" || type === "animatic_video") {
+    return type;
+  }
+  return null;
+}
+
+/** `MM/DD, HH:mm` — compact terminal log style */
+function formatExportTime(iso: string) {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString(undefined, {
+      month: "numeric",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return "";
   }
 }
 
@@ -74,9 +88,22 @@ export function ExportTerminal({
   const [exportStatus, setExportStatus] = useState<Export["status"] | null>(
     null,
   );
-  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [recentExports, setRecentExports] = useState<Export[]>([]);
+  const [recentLoading, setRecentLoading] = useState(false);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
+  const realtimeExport =
+    liveExport && currentExportId && liveExport.id === currentExportId
+      ? liveExport
+      : null;
+  const displayStatus = realtimeExport?.status ?? exportStatus;
+  const displayError =
+    realtimeExport?.status === "error" ? "Export failed" : error;
+  const terminalExportDone =
+    Boolean(currentExportId) &&
+    (realtimeExport?.status === "done" || exportStatus === "done");
 
   function toggleEvent(id: string) {
     setSelected((prev) => {
@@ -86,6 +113,29 @@ export function ExportTerminal({
       return next;
     });
   }
+
+  const loadRecentExports = useCallback(async () => {
+    if (!apiAvailable) return;
+    setRecentLoading(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/exports`);
+      if (!res.ok) {
+        throw new Error(await readApiError(res, "Could not load exports"));
+      }
+      const data = (await res.json()) as { exports: Export[] };
+      setRecentExports(data.exports ?? []);
+    } catch {
+      // Non-fatal: terminal still queues new exports
+    } finally {
+      setRecentLoading(false);
+    }
+  }, [projectId, apiAvailable]);
+
+  useEffect(() => {
+    void Promise.resolve()
+      .then(() => loadRecentExports())
+      .catch(() => undefined);
+  }, [loadRecentExports]);
 
   async function startExport() {
     if (!apiAvailable) {
@@ -98,7 +148,6 @@ export function ExportTerminal({
     }
     setSubmitting(true);
     setError(null);
-    setDownloadUrl(null);
     setExportStatus(null);
     setCurrentExportId(null);
     try {
@@ -117,6 +166,7 @@ export function ExportTerminal({
       setCurrentExportId(exp.id);
       setExportStatus(exp.status);
       onExportUpdate?.(exp);
+      void loadRecentExports();
     } catch (e) {
       const message = e instanceof Error ? e.message : "Export failed";
       setError(message);
@@ -125,18 +175,6 @@ export function ExportTerminal({
       setSubmitting(false);
     }
   }
-
-  const realtimeExport =
-    liveExport && currentExportId && liveExport.id === currentExportId
-      ? liveExport
-      : null;
-  const displayStatus = realtimeExport?.status ?? exportStatus;
-  const displayDownloadUrl =
-    realtimeExport?.status === "done"
-      ? resolveExportDownloadUrl(exportType, realtimeExport.output_url, null)
-      : downloadUrl;
-  const displayError =
-    realtimeExport?.status === "error" ? "Export failed" : error;
 
   useEffect(() => {
     if (!currentExportId) return;
@@ -160,18 +198,7 @@ export function ExportTerminal({
         };
         setExportStatus(data.export.status);
         onExportUpdate?.(data.export);
-        if (data.export.status === "done") {
-          setDownloadUrl(
-            resolveExportDownloadUrl(
-              exportType,
-              data.export.output_url,
-              data.signed_url,
-            ),
-          );
-          clearInterval(interval);
-        }
-        if (data.export.status === "error") {
-          setError("Export failed");
+        if (data.export.status === "done" || data.export.status === "error") {
           clearInterval(interval);
         }
       } catch {
@@ -183,11 +210,54 @@ export function ExportTerminal({
   }, [
     currentExportId,
     projectId,
-    exportType,
     onExportUpdate,
     realtimeActive,
     realtimeExport?.status,
   ]);
+
+  async function handleDownloadById(expId: string) {
+    if (!apiAvailable) return;
+    setDownloadingId(expId);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/exports/${expId}`);
+      if (!res.ok) {
+        toastError(await readApiError(res, "Download lookup failed"));
+        return;
+      }
+      const data = (await res.json()) as {
+        export: Export;
+        signed_url?: string;
+      };
+      const exp = data.export;
+      if (exp.status !== "done") return;
+
+      const audioUrls = parseAudioExportUrls(exp.output_url);
+      if (exp.type === "audio_script" && audioUrls.length > 0) {
+        await downloadAudioExportArtifacts(exp, audioUrls);
+        return;
+      }
+
+      const primary = resolveExportPrimaryArtifactUrl(
+        exp.type,
+        exp.output_url,
+        data.signed_url,
+      );
+      if (!primary) {
+        toastError("Export has no downloadable asset yet.");
+        return;
+      }
+      await triggerBrowserDownload(primary, buildExportArtifactFilename(exp));
+    } catch (e) {
+      toastError(e instanceof Error ? e.message : "Download failed");
+    } finally {
+      setDownloadingId(null);
+    }
+  }
+
+  async function handleDownloadCurrent() {
+    if (!currentExportId || !terminalExportDone) return;
+    await handleDownloadById(currentExportId);
+  }
 
   return (
     <div className="space-y-4 p-1">
@@ -264,21 +334,82 @@ export function ExportTerminal({
         <button
           type="button"
           disabled={submitting || selected.size === 0 || !apiAvailable}
-          onClick={startExport}
+          onClick={() => void startExport()}
           className="rounded-lg bg-[#7c3aed] py-2 text-sm font-medium text-white disabled:opacity-50"
         >
           {submitting ? "Starting…" : "Start export"}
         </button>
-        {displayStatus === "done" && displayDownloadUrl ? (
-          <a
-            href={displayDownloadUrl}
-            download
-            className="inline-flex items-center justify-center gap-2 rounded-lg border border-[#2a2a2e] py-2 text-sm text-white hover:border-[#7c3aed]"
+        {terminalExportDone && currentExportId ? (
+          <button
+            type="button"
+            disabled={downloadingId !== null || !apiAvailable}
+            onClick={() => void handleDownloadCurrent()}
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-[#2a2a2e] py-2 text-sm text-white hover:border-[#7c3aed] disabled:opacity-50"
           >
             <Download className="h-4 w-4" />
-            Download
-          </a>
+            Download latest export
+          </button>
         ) : null}
+      </div>
+
+      <div className="rounded-lg border border-[#2a2a2e] p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-[#9ca3af]">
+            Recent exports
+          </h4>
+          <button
+            type="button"
+            disabled={!apiAvailable || recentLoading}
+            onClick={() => void loadRecentExports()}
+            className="text-[10px] text-[#7c3aed] hover:underline disabled:opacity-50"
+          >
+            Refresh
+          </button>
+        </div>
+        {recentExports.length === 0 && recentLoading ? (
+          <p className="text-xs text-[#9ca3af]">Loading…</p>
+        ) : recentExports.length === 0 ? (
+          <p className="text-xs text-[#9ca3af]">No exports yet.</p>
+        ) : (
+          <ul className="max-h-40 space-y-1.5 overflow-y-auto">
+            {recentExports.map((row) => {
+              const t = exportTypeBadge(row.type);
+              const label = t ? TYPE_LABELS[t] : row.type;
+
+              return (
+                <li
+                  key={row.id}
+                  className="flex items-center gap-2 text-xs text-white"
+                >
+                  <span className="truncate font-medium text-[#e5e7eb]">
+                    {label}
+                  </span>
+                  <span className="flex-1 truncate text-[10px] text-[#9ca3af]">
+                    {formatExportTime(row.created_at)} ·{" "}
+                    <span className="font-mono">{row.status}</span>
+                  </span>
+                  {row.status === "done" ? (
+                    <button
+                      type="button"
+                      disabled={!apiAvailable || downloadingId !== null}
+                      title="Download to your device"
+                      onClick={() => void handleDownloadById(row.id)}
+                      className="shrink-0 rounded-md border border-[#2a2a2e] px-2 py-1 text-[10px] text-[#10b981] hover:border-[#10b981] disabled:opacity-50"
+                    >
+                      {downloadingId === row.id ? "Saving…" : "Download"}
+                    </button>
+                  ) : row.status === "error" ? (
+                    <span className="text-[10px] text-[#ef4444]">Failed</span>
+                  ) : (
+                    <span className="text-[10px] text-[#9ca3af]">
+                      Processing…
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
     </div>
   );
