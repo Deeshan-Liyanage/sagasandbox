@@ -11,7 +11,7 @@ interface RemoteImageProps {
   className?: string;
 }
 
-/** External/generated URLs (Fal CDN, Supabase Storage) — remotePatterns are configured in next.config.ts. */
+/** External/generated URLs — allowlist in next.config.ts (Supabase, fal CDN, Unsplash demos). */
 export function RemoteImage({
   src,
   alt,

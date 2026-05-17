@@ -18,6 +18,12 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "fal-cdn-public.s3.amazonaws.com",
       },
+      // Demo / seed event thumbnails (generated_image_url placeholders)
+      {
+        protocol: "https",
+        hostname: "images.unsplash.com",
+        pathname: "/**",
+      },
     ],
   },
 };
